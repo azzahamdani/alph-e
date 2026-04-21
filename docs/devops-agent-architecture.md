@@ -60,6 +60,40 @@ Four layers, each with a different lifetime and retrieval pattern:
 - Entity memory is cached per service; cheap to maintain, expensive to recompute per turn.
 - Evidence store is durable but TTL-bounded (30 days is usually enough for an incident lifecycle plus postmortem).
 
+### Memory substrate: Graphiti
+
+Of the four layers, only **working state** lives in the orchestrator's process memory (`IncidentState`, checkpointed to Postgres for durability across restarts). The other three — semantic, episodic, entity — share a single backend: a temporal knowledge graph managed by [Graphiti](https://github.com/getzep/graphiti).
+
+Why one backend for three layers: the questions alph-e actually asks cross the boundaries. *"Have we seen this alert shape before, and what did we believe about the affected service at that time?"* is an episodic query with an entity dimension. *"What depends on db-primary, and which of those services shipped in the last hour?"* is an entity query whose answer depends on which facts were valid at incident time. pgvector can approximate the semantic half with a timestamp filter, but a hand-rolled service graph plus pgvector plus episode vectors is three stores to keep consistent, and the seams are where retrieval breaks. Graphiti gives you bi-temporal edges (`valid_at` / `invalid_at` on every fact), entity extraction from unstructured text on ingest, and hybrid search (BM25 + vectors + graph traversal) in one place.
+
+**What goes into the graph:**
+
+- *Static seeding* — service catalog, runbooks, and prior postmortems loaded once as `EpisodeType.json` / `EpisodeType.text` episodes with `reference_time` set to when each artifact was authored. This resolves the "episodic memory bootstrap" open decision.
+- *Intake alerts* — one episode per incoming alert at intake, so the graph can be queried against itself later for the "have we seen this" match.
+- *Resolved incidents* — one episode per resolved incident, written by the Coordinator at close, containing the refined narrative: winning hypothesis, evidence IDs, remediation type, outcome.
+- *Extracted facts* — dependency chains and failure modes surfaced by collectors during an incident, folded into an episode at close (never written directly by a collector).
+
+**What stays out of the graph:**
+
+- Raw observability payloads — stay in MinIO, referenced by `EvidenceRef.storage_uri`.
+- `IncidentState` — stays in Postgres. Hot-path, single-writer, transactional; wrong shape for a graph.
+- `EvidenceRef` metadata — stays in Postgres; referenced from graph entries only by `evidence_id` attribute.
+
+**Attachment points in the runtime graph:**
+
+- *Intake* — `client.search(query=alert.signature, valid_at=alert.fired_at, group_ids=[cluster_id])` answers the "have we seen this?" query with point-in-time semantics.
+- *Investigator, per hypothesis* — `client.search_nodes(query)` and `client.search_facts(query, edge_types=["caused_by", "mitigated_by"])` return the subgraph relevant to the current hypothesis. Results fold into working state as refined facts, not blobs.
+- *Coordinator, at close* — `client.add_episode(..., group_id=cluster_id)` with the episodic summary. Batched via `add_episode_bulk`; never on the hot path.
+- *Scheduled reconciler* — a weekly job diffs the service-catalog source of truth against Graphiti's service nodes and writes corrective episodes. Without this, stale nodes linger whenever no invalidating episode naturally arrives.
+
+**Cost discipline.** Entity extraction on ingest calls an LLM every time. Three rules keep the spend bounded to the low tens of dollars per month at alph-e's incident volume: episodes are incident-level, not collector-level (one at intake, one at close); extraction runs on a cheap model (Haiku), configured independently of the orchestrator model binding; writes at close are batched via `add_episode_bulk` at the post-resolve tick, not during active investigation.
+
+**Backend choice.** FalkorDB for the local demo — Redis-based, sub-10ms reads, small footprint, which matters alongside the Postgres and MinIO the compose already runs. Neo4j for cloud — default Graphiti backend, best ecosystem, handles alph-e's expected graph sizes without tuning. Neptune is out (unnecessary AWS coupling that the rest of alph-e has avoided). Kuzu is embedded and cheap but loses the shared-service ergonomics the other stores assume.
+
+**MCP integration.** Graphiti ships an MCP server (`mcp_server/` in the Graphiti repo). Run it alongside the existing Loki / Prom / Tempo / Grafana MCP servers; the Investigator and Intake agents call its tools (`add_episode`, `search_nodes`, `search_facts`, `get_episodes`) the same way they call any other data-source MCP. No new client library in the agent runtime.
+
+**Namespacing.** One `group_id` per cluster for the first pass (`cluster_id`). Graphiti supports crossing multiple `group_ids` in one query, so adding a per-team dimension later is non-breaking.
+
 ---
 
 ## State schema
@@ -227,6 +261,8 @@ The happy path is easy. These are the paths that determine whether the system ac
 - **Approved action executes against changed reality.** Re-check preconditions immediately before mutation; default approval validity 15 min or until a precondition re-check fails.
 - **Already-resolved race.** Fresh precondition check reveals the bad deploy was already rolled back by a human — Coordinator must short-circuit to `resolved` rather than round-trip through Investigator/Planner.
 - **Crashed with subagent in flight.** State checkpoint must commit *after* evidence writes, and subagent dispatch must be keyed on `(incident_id, collector_name, question, time_range, scope, environment_fingerprint)` so restart re-dispatch is idempotent.
+- **Graphiti ingest spend runaway.** If any collector ever writes directly via `add_episode`, extraction-LLM spend climbs fast. Enforce at the collector base class: no Graphiti client on ephemeral nodes. Episodes only written at intake and by the Coordinator at close.
+- **Stale entity nodes in the graph.** Facts supersede via `invalid_at` on re-ingest, but nodes whose facts never get contradicted stay. A weekly reconciler must diff the service-catalog source of truth against Graphiti's service nodes and write corrective episodes, or the entity layer drifts.
 
 ---
 
@@ -238,7 +274,11 @@ Things the architecture deliberately leaves to you:
 2. **Human-in-the-loop mode for escalation.** Does the agent stay active as a tool, or is escalation a full handoff? Recommend the former — keeps institutional memory.
 3. **Auto-execute vs. auto-propose for operational actions.** `rollback` and `scale` can be safe to auto-execute; `flag_flip` often needs approval. Default `requires_human_approval=True`; relax per action type with deliberation.
 4. **Which model tier per role.** MVP1 uses Claude Sonnet everywhere to keep the PoC simple and measurable. Post-MVP: Haiku for Intake and Coordinator routing, Sonnet for Investigator and most collectors, Opus only for hard hypothesis synthesis. Tiering only after there's a baseline to compare against.
-5. **Episodic memory bootstrap.** Does the system start cold, or seed from existing postmortems? Seeding is worth the one-time ETL cost — past incidents are where the agent gets smarter.
+5. **Episodic memory bootstrap.** Does the system start cold, or seed from existing postmortems? Seeding is worth the one-time ETL cost — past incidents are where the agent gets smarter. Concretely: ingest each postmortem as one `EpisodeType.text` Graphiti episode with `reference_time` set to when the incident occurred and `group_id = cluster_id`.
+6. **Graph backend.** FalkorDB for local (Redis-based, sub-10ms reads, small footprint); Neo4j for cloud (default Graphiti backend, best ecosystem). Revisit only if graph size or query patterns outgrow one of them — unlikely at alph-e's incident volume.
+7. **Extraction model binding.** Haiku for Graphiti's entity/relation extraction on ingest. Kept separate from the orchestrator model so tiering the investigator later doesn't also mean re-tuning extraction prompts.
+8. **`group_id` scope.** Per cluster (`cluster_id`) for the first pass. Add a per-team or per-environment dimension later if retrieval needs it; multi-group queries are non-breaking.
+9. **Should collectors ever write to the graph directly?** No, in MVP1 and probably beyond. Deferred learning at incident close preserves the "collectors are stateless, write nothing durable" contract. Revisit only if we see a class of facts that have to be captured mid-incident because close-time reconstruction would lose them.
 
 ---
 
@@ -248,7 +288,7 @@ Things the architecture deliberately leaves to you:
 |---|---|---|
 | Agent framework | PydanticAI or LangGraph | Both have first-class typed state; LangGraph is better at explicit graph control flow |
 | LLM | Anthropic Claude Sonnet (single tier for MVP1) | Single model across all roles until there's a baseline to tier against; prompt caching is the killer cost lever regardless |
-| Semantic + episodic memory | Postgres + pgvector | Simple, adequate; don't over-engineer |
+| Semantic + episodic + entity memory | Graphiti on FalkorDB (local) / Neo4j (cloud) | See "Memory substrate: Graphiti" above. Bi-temporal edges, hybrid search, entity extraction on ingest. Extraction model should be Haiku, not the orchestrator model. |
 | Evidence store | S3 / MinIO (blobs) + Postgres (metadata) | 30-day lifecycle rules |
 | Cloud / k8s tools | MCP servers per provider | Composable, swappable, auditable |
 | Observability tools | MCP servers for Grafana / Loki / Tempo / Prometheus | Same pattern |
@@ -288,7 +328,7 @@ The agent runs alongside as a container; everything talks to the demo cluster's 
 ```yaml
 services:
   postgres:
-    image: pgvector/pgvector:pg16
+    image: postgres:16                  # pgvector no longer needed; graph memory lives in FalkorDB
     container_name: postgres
     environment:
       POSTGRES_PASSWORD: devops
@@ -297,6 +337,15 @@ services:
       - postgres-data:/var/lib/postgresql/data
     ports:
       - "5432:5432"
+
+  falkordb:
+    image: falkordb/falkordb:latest
+    container_name: falkordb
+    ports:
+      - "6379:6379"                     # redis protocol, used by Graphiti
+      - "3001:3000"                     # optional browser UI
+    volumes:
+      - falkordb-data:/var/lib/falkordb/data
 
   minio:
     image: minio/minio:latest
@@ -320,16 +369,22 @@ services:
       - POSTGRES_URL=postgresql://postgres:devops@postgres:5432/incidents
       - EVIDENCE_S3_ENDPOINT=http://minio:9000
       - EVIDENCE_S3_BUCKET=incidents
+      - GRAPHITI_BACKEND=falkordb
+      - GRAPHITI_URI=redis://falkordb:6379
+      - GRAPHITI_EXTRACTION_MODEL=claude-haiku-4-5-20251001
+      - GRAPHITI_GROUP_ID_DEFAULT=cluster-local
       - KUBECONFIG=/root/.kube/config
     volumes:
       - ~/.kube:/root/.kube:ro
     depends_on:
       - postgres
       - minio
+      - falkordb
 
 volumes:
   postgres-data:
   minio-data:
+  falkordb-data:
 ```
 
 ### What MVP1 deliberately does *not* cover
