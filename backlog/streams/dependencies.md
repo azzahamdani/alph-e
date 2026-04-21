@@ -17,7 +17,7 @@ described in the Notes column.
 | F-04 | LLM-call observability (structlog + cost) | done | agent-builder | F-01 | |
 | F-05 | ActionIntent signer / verifier | done | agent-builder | — | |
 | F-06 | Evidence client — MinIO + Postgres impl | done | evidence-specialist | — | |
-| F-07 | Postgres checkpointer integration test | in_progress | agent-builder | F-06 | |
+| F-07 | Postgres checkpointer integration test | done | agent-builder | F-06 | |
 
 ## Beta — reasoning nodes
 
