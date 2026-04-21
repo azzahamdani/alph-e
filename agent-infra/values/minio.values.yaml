@@ -1,0 +1,48 @@
+# Values for the official MinIO Helm chart (chart name: minio/minio).
+# We switched from the Bitnami chart because Bitnami's chart is hardcoded to
+# their own image's filesystem layout, and mixing it with the upstream
+# minio/minio image causes issues the chart wasn't designed for.
+#
+# The official chart talks to the upstream image natively. Simpler, works
+# out of the box.
+#
+# Reference: ADR-0006 (superseded by teammate's pending ADR-0008).
+
+# Single-node, single-drive — the lightest mode the chart offers. Fine for a lab.
+mode: standalone
+replicas: 1
+
+# Credentials match the old compose defaults so agent code doesn't have to
+# change during migration.
+rootUser: minio
+rootPassword: minio-dev-secret
+
+persistence:
+  enabled: true
+  storageClass: local-path
+  size: 10Gi
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 256Mi
+  # The chart sets a very generous default memory request that can fail
+  # to schedule on small clusters; cap it explicitly.
+  # Limits are intentionally absent — MinIO uses whatever's available.
+
+  # The chart's native bucket-creation mechanism. Replaces the minio-init
+  # compose service. The chart runs a post-install Job that calls `mc mb`
+  # for each entry here, so we don't need our own bucket-bootstrap Job.
+buckets:
+  - name: incidents
+    policy: none
+    purge: false
+
+# Disable metrics for now — not scraping MinIO in the lab.
+metrics:
+  serviceMonitor:
+    enabled: false
+
+# Console is included in the standard image; no separate chart component.
+consoleService:
+  type: ClusterIP

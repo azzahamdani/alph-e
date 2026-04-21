@@ -69,18 +69,25 @@ The agent itself lives in two sibling trees:
 
 - [`agent/`](agent/) — Python orchestrator (LangGraph + FastAPI + Pydantic schemas)
 - [`collectors/`](collectors/) — Go services the orchestrator dispatches against
-- [`infra/`](infra/) — host-side docker-compose for Postgres + MinIO (agent deps)
+- [`agent-infra/`](agent-infra/) — in-cluster Postgres + MinIO (agent deps)
 
 Quick start (in addition to `task up`):
 
 ```
-task infra:up              # Postgres + MinIO
-task agent:install         # uv sync
-task agent:test            # schemas + routing + intake
-task collectors:test       # go test ./...
-task monitoring:alerts     # apply the PrometheusRule that fires the OOM alert
-task agent:serve           # FastAPI on :8000 — Alertmanager's target
-task collectors:run        # three services on :8001 / :8002 / :8003
+task agent-infra:install    # Postgres + MinIO (Helm, in-cluster)
+task agent:install          # uv sync
+task agent:test             # schemas + routing + intake
+task collectors:test        # go test ./...
+task monitoring:alerts      # apply the PrometheusRule that fires the OOM alert
+task agent:serve            # FastAPI on :8000 — Alertmanager's target
+task collectors:run         # three services on :8001 / :8002 / :8003
+```
+
+For host access to the agent-infra services, run in separate terminals:
+
+```
+task agent-infra:postgres   # → localhost:5432
+task agent-infra:minio      # → localhost:9000 / :9001
 ```
 
 Design docs and ADRs:

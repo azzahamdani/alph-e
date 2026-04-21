@@ -1,0 +1,54 @@
+# Post-install Job that applies a 30-day lifecycle rule to the `incidents`
+# bucket. The bucket itself is created by the MinIO chart's `buckets:` value;
+# this Job only sets the TTL since the chart doesn't expose lifecycle config.
+#
+# Idempotent — `mc ilm rule add` with `|| true` handles the rule-already-exists
+# case.
+
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: minio-lifecycle-bootstrap
+  namespace: agent-infra
+  labels:
+    app.kubernetes.io/name: minio-lifecycle-bootstrap
+    app.kubernetes.io/part-of: agent-infra
+spec:
+  ttlSecondsAfterFinished: 86400
+  backoffLimit: 3
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: minio-lifecycle-bootstrap
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: mc
+          image: minio/mc:latest
+          env:
+            - name: MC_HOST_local
+              # Must match rootUser / rootPassword in the MinIO values file.
+              value: http://minio:minio-dev-secret@minio.agent-infra.svc.cluster.local:9000
+          command: [ "/bin/sh", "-c" ]
+          args:
+            - |
+              set -eu
+              echo "→ Waiting for MinIO to be reachable and bucket to exist..."
+              for i in $(seq 1 30); do
+                if mc ls local/incidents >/dev/null 2>&1; then
+                  echo "  bucket 'incidents' reachable after ${i} attempts"
+                  break
+                fi
+                sleep 2
+              done
+              echo "→ Applying 30-day lifecycle rule..."
+              mc ilm rule add --expire-days 30 local/incidents || true
+              echo "→ Current lifecycle rules:"
+              mc ilm rule ls local/incidents
+              echo "✓ Lifecycle bootstrap complete"
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 128Mi

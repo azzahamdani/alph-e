@@ -42,15 +42,17 @@ tasks:
   monitoring:repos:
     desc: Add Helm repos for monitoring stack
     cmds:
-      - helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+      - helm repo add prometheus-community
+        https://prometheus-community.github.io/helm-charts
       - helm repo add grafana https://grafana.github.io/helm-charts
       - helm repo update
 
   monitoring:install:
     desc: Install kube-prometheus-stack, Loki, and Alloy
-    deps: [monitoring:repos]
+    deps: [ monitoring:repos ]
     cmds:
-      - kubectl create namespace {{.MONITORING_NS}} --dry-run=client -o yaml | kubectl apply -f -
+      - kubectl create namespace {{.MONITORING_NS}} --dry-run=client -o yaml |
+        kubectl apply -f -
       - |
         helm upgrade --install kps prometheus-community/kube-prometheus-stack \
           --namespace {{.MONITORING_NS}} \
@@ -97,6 +99,27 @@ tasks:
       - helm uninstall loki -n {{.MONITORING_NS}} || true
       - helm uninstall kps -n {{.MONITORING_NS}} || true
 
+  # ── UI port-forwards (each blocks — run in separate terminals) ──────
+
+  grafana:
+    desc: Port-forward Grafana to http://localhost:3000 (admin/admin)
+    cmds:
+      - echo "Grafana → http://localhost:3000 (admin/admin, skip password
+        change)"
+      - kubectl -n {{.MONITORING_NS}} port-forward svc/kps-grafana 3000:80
+
+  prometheus:
+    desc: Port-forward Prometheus to http://localhost:9090
+    cmds:
+      - echo "Prometheus → http://localhost:9090"
+      - kubectl -n {{.MONITORING_NS}} port-forward svc/kps-prometheus 9090:9090
+
+  alertmanager:
+    desc: Port-forward Alertmanager to http://localhost:9093
+    cmds:
+      - echo "Alertmanager → http://localhost:9093"
+      - kubectl -n {{.MONITORING_NS}} port-forward svc/kps-alertmanager 9093:9093
+
   # ── Demo app ─────────────────────────────────────────────────────────
 
   demo:build:
@@ -108,7 +131,7 @@ tasks:
 
   demo:deploy:
     desc: Deploy the leaky-service demo app
-    deps: [demo:build]
+    deps: [ demo:build ]
     cmds:
       - kubectl apply -f demo-app/manifests.yaml
       - kubectl -n demo rollout status deployment/leaky-service --timeout=120s
@@ -174,21 +197,29 @@ tasks:
   # ── Everything ───────────────────────────────────────────────────────
 
   up:
-    desc: Full bootstrap — cluster + monitoring + demo app
+    desc: Full bootstrap — cluster + monitoring + agent-infra + demo + mcp
     cmds:
       - task: cluster:up
       - task: monitoring:install
+      - task: agent-infra:install
       - task: demo:deploy
+      - task: mcp:install
       - task: urls
 
   urls:
-    desc: Print the URLs for Grafana/Prometheus/Alertmanager
+    desc: Print how to access the lab
     cmds:
       - |
         echo ""
-        echo "  Grafana:      http://localhost:3000  (admin / admin)"
-        echo "  Prometheus:   http://localhost:9090"
-        echo "  Alertmanager: http://localhost:9093"
+        echo "  Cluster UIs — run each in its own terminal (they block):"
+        echo "    task grafana                → http://localhost:3000  (admin / admin)"
+        echo "    task prometheus             → http://localhost:9090"
+        echo "    task alertmanager           → http://localhost:9093"
+        echo "    task mcp:forward            → http://localhost:8000/mcp"
+        echo ""
+        echo "  Agent-infra (cluster-internal; port-forward for host access):"
+        echo "    task agent-infra:postgres   → localhost:5432"
+        echo "    task agent-infra:minio      → localhost:9000 / :9001"
         echo ""
         echo "  Watch the OOM loop:   task demo:watch"
         echo ""
@@ -232,7 +263,8 @@ tasks:
     desc: Fire the OOM fixture at the in-process Intake app
     dir: agent
     cmds:
-      - uv run python -m agent fire tests/fixtures/incidents/oom-leaky-service.json
+      - uv run python -m agent fire
+        tests/fixtures/incidents/oom-leaky-service.json
 
   # ── Collectors (Go) ──────────────────────────────────────────────────
 
@@ -260,41 +292,107 @@ tasks:
     cmds:
       - make run
 
-  # ── Agent-side infra (Postgres + MinIO) ──────────────────────────────
+  # ── Agent-infra (Postgres + MinIO, in-cluster) ───────────────────────
+  # Replaces the old host-side docker-compose stack. Helm-based.
+  # See agent-infra/README.md and ADR-0008.
 
-  infra:up:
-    desc: Start Postgres + MinIO via docker compose
-    dir: infra
+  agent-infra:repos:
+    desc: Add the Helm repos for Postgres (Bitnami) + MinIO (official)
     cmds:
-      - docker compose up -d
+      - helm repo add bitnami https://charts.bitnami.com/bitnami
+      - helm repo add minio https://charts.min.io/
+      - helm repo update bitnami minio
 
-  infra:down:
-    desc: Stop the host-side infra stack
-    dir: infra
+  agent-infra:install:
+    desc: Install Postgres + MinIO + bucket bootstrap Job in the cluster
+    deps: [ agent-infra:repos ]
     cmds:
-      - docker compose down
+      - kubectl create namespace agent-infra --dry-run=client -o yaml | kubectl
+        apply -f -
+      - |
+        helm upgrade --install postgres bitnami/postgresql \
+          --namespace agent-infra \
+          --values agent-infra/values/postgresql.values.yaml \
+          --wait --timeout 5m
+      - |
+        helm upgrade --install minio minio/minio \
+          --namespace agent-infra \
+          --values agent-infra/values/minio.values.yaml \
+          --wait --timeout 5m
+      - kubectl apply -f agent-infra/manifests/minio-lifecycle-job.yaml
+      - kubectl -n agent-infra wait --for=condition=complete
+        job/minio-lifecycle-bootstrap --timeout=2m
+      - kubectl -n agent-infra logs job/minio-lifecycle-bootstrap
 
-  infra:logs:
-    desc: Follow infra container logs
-    dir: infra
+  agent-infra:uninstall:
+    desc: Uninstall Postgres + MinIO (keeps PVCs)
     cmds:
-      - docker compose logs -f
+      - helm uninstall minio -n agent-infra || true
+      - helm uninstall postgres -n agent-infra || true
+      - kubectl delete job minio-lifecycle-bootstrap -n agent-infra
+        --ignore-not-found
 
-  infra:psql:
-    desc: Open a psql shell against the local postgres container
-    dir: infra
+  agent-infra:nuke:
+    desc: Uninstall AND delete PVCs (wipes all data)
     cmds:
-      - docker compose exec postgres psql -U postgres -d incidents
+      - task: agent-infra:uninstall
+      - kubectl delete pvc -n agent-infra --all --ignore-not-found
+      - kubectl delete namespace agent-infra --ignore-not-found
+
+  agent-infra:status:
+    desc: Show Postgres + MinIO pods
+    cmds:
+      - kubectl get pods,svc,pvc -n agent-infra
+
+  # Port-forwards — each blocks. Run in separate terminals.
+  # Host-agent (MVP1) talks to these as localhost; in-cluster agent (MVP2)
+  # bypasses and uses service DNS directly.
+
+  agent-infra:postgres:
+    desc: Port-forward Postgres to localhost:5432
+    cmds:
+      - echo "Postgres → localhost:5432 (devops/devops, db=incidents)"
+      - kubectl -n agent-infra port-forward svc/postgres 5432:5432
+
+  agent-infra:minio:
+    desc: Port-forward MinIO API to localhost:9000 + console to localhost:9001
+    cmds:
+      - echo "MinIO S3  → localhost:9000 (minio / minio-dev-secret)"
+      - echo "MinIO UI  → localhost:9001"
+      - |
+        # Forward both services in parallel, kill both on exit
+        kubectl -n agent-infra port-forward svc/minio 9000:9000 &
+        FWD1=$!
+        kubectl -n agent-infra port-forward svc/minio-console 9001:9001 &
+        FWD2=$!
+        trap "kill $FWD1 $FWD2 2>/dev/null" EXIT INT TERM
+        wait
+
+  agent-infra:psql:
+    desc: Exec into the Postgres pod and open a psql shell
+    cmds:
+      - |
+        POD=$(kubectl -n agent-infra get pod -l app.kubernetes.io/name=postgresql -o jsonpath='{.items[0].metadata.name}')
+        kubectl -n agent-infra exec -it "$POD" -- env PGPASSWORD=devops psql -U devops -d incidents
+
+  agent-infra:logs:
+    desc: Tail Postgres + MinIO logs
+    cmds:
+      - kubectl -n agent-infra logs -f -l
+        'app.kubernetes.io/part-of!=agent-infra' --all-containers --prefix=true
+        --tail=50
 
   # ── Dev aggregate ────────────────────────────────────────────────────
 
   dev:
-    desc: Bring up infra + collectors + agent for local development
-    deps: [infra:up]
+    desc: Bring up agent-infra + collectors + agent for local development
+    deps: [ agent-infra:install ]
     cmds:
       - |
         echo ""
-        echo "  infra is up. In separate terminals run:"
-        echo "    task collectors:run    # ports 8001/8002/8003"
-        echo "    task agent:serve       # port 8000 (Alertmanager target)"
+        echo "  agent-infra is up. In separate terminals run:"
+        echo "    task agent-infra:postgres   # localhost:5432"
+        echo "    task agent-infra:minio      # localhost:9000 / :9001"
+        echo "    task collectors:run         # ports 8001/8002/8003"
+        echo "    task agent:serve            # port 8000 (Alertmanager target)"
         echo ""

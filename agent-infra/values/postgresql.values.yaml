@@ -1,0 +1,72 @@
+# Bitnami postgresql chart values for the agent-infra Postgres.
+# We override the image to pgvector/pgvector so the `vector` extension is available —
+# same behaviour as the old host-side docker-compose stack.
+#
+# Bitnami added image-verification in v15+ that blocks non-"certified" images.
+# The pgvector/pgvector image is maintained by the pgvector project and built on
+# the official postgres base, so it's safe — we just need to opt out of Bitnami's
+# certification check.
+# Reference: ADR-0006 (superseded by teammate's pending ADR-0008).
+
+global:
+  security:
+    allowInsecureImages: true
+
+image:
+  registry: docker.io
+  repository: pgvector/pgvector
+  tag: pg16
+  pullPolicy: IfNotPresent
+
+# Credentials match the compose defaults so EvidenceClient code doesn't
+# have to change during the migration.
+auth:
+  username: devops
+  password: devops
+  database: incidents
+  # postgresPassword is for the `postgres` superuser; we don't use it but
+  # Bitnami's chart requires it. Different value so the app account isn't
+  # masquerading as superuser.
+  postgresPassword: devops-postgres
+
+primary:
+  # Enable pgvector as an init script — same approach as the old
+  # infra/postgres/init/00-pgvector.sql.
+  initdb:
+    scripts:
+      00-pgvector.sql: |
+        CREATE EXTENSION IF NOT EXISTS vector;
+  # Bitnami's chart sets readOnlyRootFilesystem on the container, with writable
+  # emptyDirs at specific paths tuned for Bitnami's own postgres image. The
+  # official pgvector image (built on Debian postgres) writes its socket lock
+  # to /var/run/postgresql, which isn't in Bitnami's default mount list — so
+  # we add it back.
+  extraVolumes:
+    - name: postgresql-run
+      emptyDir: {}
+  extraVolumeMounts:
+    - name: postgresql-run
+      mountPath: /var/run/postgresql
+  persistence:
+    enabled: true
+    storageClass: local-path
+    size: 4Gi
+  resources:
+    requests:
+      cpu: 50m
+      memory: 256Mi
+    limits:
+      memory: 1Gi
+  # Single node — no replicas, no standby. Lab.
+  service:
+    type: ClusterIP
+    ports:
+      postgresql: 5432
+
+# Disable metrics exporter — we're not scraping this in the lab.
+metrics:
+  enabled: false
+
+# Disable read replicas.
+readReplicas:
+  replicaCount: 0

@@ -12,7 +12,7 @@ This repo contains both the **lab substrate** for a DevOps investigation agent a
 - ADRs for the locked-in decisions under [docs/adr/](docs/adr/) (0001–0007).
 - Python orchestrator skeleton under [agent/](agent/): Pydantic schemas, LangGraph StateGraph, FastAPI intake, routing, stub nodes.
 - Go collectors skeleton under [collectors/](collectors/): HTTP services for Prometheus/Loki/kube with a shared contract mirror.
-- Host-side infra under [infra/](infra/): docker-compose for Postgres (pgvector) + MinIO with a 30-day lifecycle rule.
+- Host-side infra under [agent-infra/](agent-infra/): Helm-managed Postgres (pgvector) + MinIO in the cluster with a 30-day lifecycle rule.
 - Build-fleet scaffolding under [.claude/agents/](.claude/agents/) + [backlog/](backlog/).
 
 Before writing reasoning logic, check the MVP1 scope in [docs/devops-agent-architecture.md](docs/devops-agent-architecture.md) under "MVP1: PoC deployment" — Claude Sonnet across all reasoning roles; Haiku is a post-MVP candidate for Intake/Coordinator/collectors.
@@ -31,10 +31,10 @@ Everything is driven through [Taskfile.yml](Taskfile.yml). `task --list` shows a
 - `task monitoring:alerts` — apply [monitoring/alert-rules.yaml](monitoring/alert-rules.yaml) (PodOOMKilled, PodMemoryRisingFast).
 
 **Agent side:**
-- `task infra:up | down | logs | psql` — Postgres + MinIO (docker compose under [infra/](infra/)).
+- `task agent-infra:install | uninstall | status | psql | postgres | minio | logs` — Postgres + MinIO (Helm, in-cluster under [agent-infra/](agent-infra/)).
 - `task agent:install | lint | test | serve | fire` — uv-managed Python orchestrator.
 - `task collectors:lint | test | build | run` — Go collector services.
-- `task dev` — bring up infra and remind you how to run agent + collectors.
+- `task dev` — bring up agent-infra and remind you how to run agent + collectors.
 
 Agent tests live under [agent/tests/](agent/tests/). Collector tests live alongside the packages under [collectors/](collectors/). Lint configs are in [agent/pyproject.toml](agent/pyproject.toml) (ruff + mypy strict) and [collectors/.golangci.yml](collectors/.golangci.yml).
 
@@ -62,6 +62,6 @@ Commit both files together. The original `.mmd` sources were recovered from comm
 - [docs/](docs/) — agent architecture and build-fleet docs, diagrams (`.mmd` + `.svg`), ADRs.
 - [agent/](agent/) — Python orchestrator (uv + LangGraph + FastAPI + Pydantic). Schemas, routing, intake, stub nodes.
 - [collectors/](collectors/) — Go collectors (Prometheus/Loki/kube). Shared contract mirror in `internal/contract`.
-- [infra/](infra/) — host-side docker-compose for Postgres + MinIO.
+- [agent-infra/](agent-infra/) — in-cluster Postgres + MinIO (Helm values + bucket bootstrap Job).
 - [backlog/](backlog/) — WorkItem YAMLs the build fleet dispatches against.
 - [.claude/agents/](.claude/agents/) — build-fleet subagent definitions.
