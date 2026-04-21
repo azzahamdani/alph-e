@@ -15,19 +15,10 @@ import anthropic
 import structlog
 from anthropic.types import Message, TextBlockParam
 
+from agent.llm.errors import MissingAPIKeyError as MissingAPIKeyError  # noqa: PLC0414
 from agent.llm.settings import LLMSettings
 
 log = structlog.get_logger(__name__)
-
-
-class MissingAPIKeyError(RuntimeError):
-    """Raised when ``ANTHROPIC_API_KEY`` is absent from the environment."""
-
-    def __init__(self) -> None:
-        super().__init__(
-            "ANTHROPIC_API_KEY is not set. "
-            "Export the environment variable before starting the agent."
-        )
 
 
 class Client:
