@@ -29,7 +29,7 @@ described in the Notes column.
 | B-04 | Dev agent (FixProposal with real diff) | done | agent-builder | F-01, F-02, F-03 | |
 | B-05 | Verifier node (dry-run checks) | done | agent-builder | F-01, F-02, F-03 | |
 | B-06 | Reviewer node (PR policy gate) | done | agent-builder | F-01, F-02, F-03 | |
-| B-07 | Coordinator node (exec + escalation) | in_progress | agent-builder | — | F-05, F-06, B-03 | |
+| B-07 | Coordinator node (exec + escalation) | done | agent-builder | F-05, F-06, B-03 | |
 
 ## Gamma — Go collectors
 
