@@ -30,13 +30,16 @@ write-order invariant: blob first, metadata second.
 
 - Replace stubs in `agent/src/agent/evidence/client.py`.
 - New: `agent/src/agent/evidence/errors.py`.
-- New: `agent/tests/integration/test_evidence_client.py` — runs against the
-  MinIO + Postgres docker-compose, gated behind a `pytest -m integration` marker.
+- New: `agent/tests/integration/test_evidence_client.py` — runs against
+  MinIO + Postgres in the `agent-infra` namespace, gated behind a
+  `pytest -m integration` marker.
 
 ## Acceptance
 
 - `mypy --strict` clean.
-- `task infra:up && task agent:test -- -m integration` passes.
+- `task agent-infra:install` has been run; `task agent-infra:postgres`
+  and `task agent-infra:minio` are running in separate terminals;
+  `task agent:test -- -m integration` passes.
 - Integration test asserts: put → get round-trip; metadata row visible;
   best-effort blob delete on metadata failure (use a forced unique-violation).
 

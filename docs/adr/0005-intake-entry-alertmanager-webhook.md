@@ -20,7 +20,7 @@ leaky-service OOM → Prometheus fires PodOOMKilled
                  → agent/src/agent/intake/webhook.py parses, seeds IncidentState, enters the graph
 ```
 
-Host resolution from Alertmanager (in-cluster) to the agent (host-side during MVP1): the k3d loadbalancer resolves the host via **`host.k3d.internal`** (k3d ≥ 5.7). Agent runs on `:8000`, so the webhook URL is `http://host.k3d.internal:8000/webhook/alertmanager`.
+Host resolution from Alertmanager (in-cluster) to the agent (host-side during MVP1): the k3d loadbalancer resolves the host via **`host.k3d.internal`** (k3d ≥ 5.7). Agent runs on `:8000`, so the webhook URL is `http://host.k3d.internal:8000/webhook/alertmanager`. MVP2 moves the agent in-cluster; at that point the URL becomes `http://agent.agent-system.svc.cluster.local:8000/webhook/alertmanager` (exact namespace TBD when the agent move ADR lands) and `host.k3d.internal` is no longer needed.
 
 Slack adapter deferred. Planned location when it lands: `agent/src/agent/intake/slack.py`. Behind the same `IncidentState` seed — the graph doesn't care where the alert came from.
 

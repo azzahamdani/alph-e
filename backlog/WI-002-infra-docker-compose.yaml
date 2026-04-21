@@ -1,26 +1,38 @@
 id: WI-002
-title: Docker Compose with Postgres+pgvector and MinIO
-component: infra.docker-compose
+title: In-cluster agent-infra — Postgres (pgvector) + MinIO via Helm
+component: infra.agent-infra
 acceptance_criteria:
-  - docker compose up -d brings up postgres, minio, minio-init cleanly
-  - minio-init creates the `incidents` bucket with a 30-day lifecycle rule
-  - postgres exposes port 5432 with pgvector extension enabled
-  - minio exposes ports 9000 (API) and 9001 (console)
-  - Env-driven config (POSTGRES_PASSWORD, MINIO_ROOT_USER, MINIO_ROOT_PASSWORD)
-  - task infra:up|down|logs|psql all work
-  - README section documents the service URLs and default credentials
+  - task agent-infra:install succeeds cleanly on a fresh k3d cluster
+  - Postgres runs in the agent-infra namespace on port 5432 with pgvector
+    extension loaded (\dx shows vector)
+  - MinIO runs in the agent-infra namespace exposing S3 API on port 9000 and
+    console on port 9001
+  - The `incidents` bucket exists with a 30-day lifecycle rule applied via the
+    minio-lifecycle-bootstrap Job
+  - task agent-infra:postgres and task agent-infra:minio expose each service to
+    the host via port-forward
+  - task agent-infra:psql opens a working psql session against the incidents
+    database
+  - task agent-infra:nuke cleanly removes the namespace and PVCs
+  - Credentials preserved from the old docker-compose defaults so EvidenceClient
+    doesn't need changes (devops/devops, minio/minio-dev-secret, bucket
+    `incidents`)
+  - README and CLAUDE.md document the agent-infra layout and access pattern
 interface_contracts: []
 relevant_adrs:
-  - ADR-0006
+  - ADR-0008
 allowed_paths:
-  - infra/**
+  - agent-infra/**
   - Taskfile.yml
   - README.md
+  - CLAUDE.md
 blocked_paths:
   - agent/**
   - collectors/**
   - cluster/**
   - monitoring/**
+  - mcp/**
+  - demo-app/**
 depends_on: []
 estimated_complexity: small
 max_iterations: 2

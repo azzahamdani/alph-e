@@ -1,6 +1,8 @@
 # ADR-0006: Evidence store — MinIO blobs + Postgres metadata
 
-- Status: accepted
+> **Superseded by ADR-0008.** This ADR described the original host-side docker-compose stack; the implementation is now in-cluster Helm. See ADR-0008 for the current state.
+
+- Status: superseded
 - Date: 2026-04-21
 
 ## Context

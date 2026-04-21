@@ -15,7 +15,8 @@ Prove the LangGraph Postgres checkpointer wired in
 ## Requirements
 
 - New integration test that:
-  1. Starts the graph against the `infra:up` Postgres.
+  1. Starts the graph against the in-cluster Postgres (reached via
+     `task agent-infra:postgres` during MVP1).
   2. Runs the graph through Intake → Investigator → END (using the existing
      skeleton nodes — no LLM dependency).
   3. Reads back the checkpoint via the same saver and asserts the final
@@ -34,7 +35,8 @@ Prove the LangGraph Postgres checkpointer wired in
 
 ## Acceptance
 
-- Test passes against `task infra:up`.
+- Test passes against `task agent-infra:install` with `task agent-infra:postgres`
+  running in a separate terminal.
 - A second test run reuses the checkpoint and short-circuits on the same
   `incident_id` (the saver returns the prior state).
 

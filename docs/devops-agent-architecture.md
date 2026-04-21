@@ -88,7 +88,7 @@ Why one backend for three layers: the questions alph-e actually asks cross the b
 
 **Cost discipline.** Entity extraction on ingest calls an LLM every time. Three rules keep the spend bounded to the low tens of dollars per month at alph-e's incident volume: episodes are incident-level, not collector-level (one at intake, one at close); extraction runs on a cheap model (Haiku), configured independently of the orchestrator model binding; writes at close are batched via `add_episode_bulk` at the post-resolve tick, not during active investigation.
 
-**Backend choice.** FalkorDB for the local demo — Redis-based, sub-10ms reads, small footprint, which matters alongside the Postgres and MinIO the compose already runs. Neo4j for cloud — default Graphiti backend, best ecosystem, handles alph-e's expected graph sizes without tuning. Neptune is out (unnecessary AWS coupling that the rest of alph-e has avoided). Kuzu is embedded and cheap but loses the shared-service ergonomics the other stores assume.
+**Backend choice.** FalkorDB for the local demo — Redis-based, sub-10ms reads, small footprint, which matters alongside the Postgres and MinIO already running in the agent-infra namespace. Neo4j for cloud — default Graphiti backend, best ecosystem, handles alph-e's expected graph sizes without tuning. Neptune is out (unnecessary AWS coupling that the rest of alph-e has avoided). Kuzu is embedded and cheap but loses the shared-service ergonomics the other stores assume.
 
 **MCP integration.** Graphiti ships an MCP server (`mcp_server/` in the Graphiti repo). Run it alongside the existing Loki / Prom / Tempo / Grafana MCP servers; the Investigator and Intake agents call its tools (`add_episode`, `search_nodes`, `search_facts`, `get_episodes`) the same way they call any other data-source MCP. No new client library in the agent runtime.
 
@@ -289,7 +289,7 @@ Things the architecture deliberately leaves to you:
 | Agent framework | PydanticAI or LangGraph | Both have first-class typed state; LangGraph is better at explicit graph control flow |
 | LLM | Anthropic Claude Sonnet (single tier for MVP1) | Single model across all roles until there's a baseline to tier against; prompt caching is the killer cost lever regardless |
 | Semantic + episodic + entity memory | Graphiti on FalkorDB (local) / Neo4j (cloud) | See "Memory substrate: Graphiti" above. Bi-temporal edges, hybrid search, entity extraction on ingest. Extraction model should be Haiku, not the orchestrator model. |
-| Evidence store | S3 / MinIO (blobs) + Postgres (metadata) | 30-day lifecycle rules |
+| Evidence store | S3 / MinIO (blobs) + Postgres (metadata) | 30-day lifecycle rules; MVP1 runs in-cluster via Helm |
 | Cloud / k8s tools | MCP servers per provider | Composable, swappable, auditable |
 | Observability tools | MCP servers for Grafana / Loki / Tempo / Prometheus | Same pattern |
 | Code / PR | GitHub API + Claude Code CLI (optional) | Claude Code handles branch / commit / PR mechanics well |
@@ -321,71 +321,22 @@ A small Kubernetes cluster (kind / k3d / minikube, or a single-node EKS/GKE dev 
 - Grafana LGTM stack or the Grafana Cloud free tier as the observability backend.
 - A seed incident generator that triggers each failure mode on demand.
 
-The agent runs alongside as a container; everything talks to the demo cluster's APIs.
+### In-cluster infrastructure
 
-### Docker compose (agent side)
+The k3d cluster hosts both the target environment (demo workloads + monitoring stack) and the agent-side infrastructure:
 
-```yaml
-services:
-  postgres:
-    image: postgres:16                  # pgvector no longer needed; graph memory lives in FalkorDB
-    container_name: postgres
-    environment:
-      POSTGRES_PASSWORD: devops
-      POSTGRES_DB: incidents
-    volumes:
-      - postgres-data:/var/lib/postgresql/data
-    ports:
-      - "5432:5432"
+| Component | Namespace | Purpose | Access (MVP1) |
+|---|---|---|---|
+| **Postgres** | `agent-infra` | Evidence metadata + LangGraph checkpoints | `task agent-infra:postgres` (localhost:5432) |
+| **MinIO** | `agent-infra` | Evidence blob storage with 30-day lifecycle | `task agent-infra:minio` (API: localhost:9000, console: localhost:9001) |
+| **FalkorDB** | `agent-infra` | Graphiti's episodic/semantic/entity memory | Not yet deployed (see `backlog/WI-016-agent-infra-falkordb.yaml`) |
+| **Agent** | host (MVP1) / in-cluster (MVP2) | Orchestrator + intake + reasoning nodes | Host-side uv process in MVP1 |
 
-  falkordb:
-    image: falkordb/falkordb:latest
-    container_name: falkordb
-    ports:
-      - "6379:6379"                     # redis protocol, used by Graphiti
-      - "3001:3000"                     # optional browser UI
-    volumes:
-      - falkordb-data:/var/lib/falkordb/data
+- **Postgres**: Bitnami postgresql chart with pgvector image override (`pgvector/pgvector:pg16`). 4Gi PVC on local-path. Configuration at `agent-infra/values/postgresql.values.yaml`.
+- **MinIO**: Official minio/minio chart, standalone mode with 10Gi PVC. Creates `incidents` bucket natively. 30-day lifecycle rule applied via post-install Job at `agent-infra/manifests/minio-lifecycle-job.yaml`.
+- **FalkorDB**: Graph backend for Graphiti's memory layer. Runs in-cluster in the `agent-infra` namespace alongside Postgres and MinIO. Deployment is tracked as WI-016 — not yet implemented.
 
-  minio:
-    image: minio/minio:latest
-    container_name: minio
-    command: server /data --console-address ":9001"
-    environment:
-      MINIO_ROOT_USER: minio
-      MINIO_ROOT_PASSWORD: minio-dev-secret
-    volumes:
-      - minio-data:/data
-    ports:
-      - "9000:9000"
-      - "9001:9001"
-
-  devops-agent:
-    build: ./agent
-    container_name: devops-agent
-    environment:
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
-      - MODEL_NAME=claude-sonnet-4-6
-      - POSTGRES_URL=postgresql://postgres:devops@postgres:5432/incidents
-      - EVIDENCE_S3_ENDPOINT=http://minio:9000
-      - EVIDENCE_S3_BUCKET=incidents
-      - GRAPHITI_BACKEND=falkordb
-      - GRAPHITI_URI=redis://falkordb:6379
-      - GRAPHITI_EXTRACTION_MODEL=claude-haiku-4-5-20251001
-      - GRAPHITI_GROUP_ID_DEFAULT=cluster-local
-      - KUBECONFIG=/root/.kube/config
-    volumes:
-      - ~/.kube:/root/.kube:ro
-    depends_on:
-      - postgres
-      - minio
-      - falkordb
-
-volumes:
-  postgres-data:
-  minio-data:
-  falkordb-data:
-```
+**Bring-up**: `task up` orchestrates cluster creation, monitoring installation, agent-infra deployment, and demo workload. Host-side access to cluster services is via port-forwards during MVP1 (agent on host), transitioning to internal service DNS in MVP2 (agent in-cluster).
 
 ### What MVP1 deliberately does *not* cover
 

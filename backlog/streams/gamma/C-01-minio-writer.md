@@ -21,9 +21,10 @@ MinIO via the AWS S3 SDK and returns a populated `contract.EvidenceRef`.
 - `Put` writes the blob with `PutObject` and returns the `EvidenceRef` whose
   `StorageURI` is `s3://<bucket>/<evidence_id>` and whose `ExpiresAt` is
   `time.Now().Add(DefaultTTL)`.
-- Bucket bootstrap is **not** the writer's job — `infra:up` already creates
-  the bucket and lifecycle rule. Writer assumes the bucket exists; surface
-  a typed error otherwise.
+- Bucket bootstrap is **not** the writer's job — the MinIO Helm chart creates
+  the `incidents` bucket, and `agent-infra/manifests/minio-lifecycle-job.yaml`
+  applies the 30-day lifecycle rule. Writer assumes the bucket exists;
+  surface a typed error otherwise.
 
 ## Deliverables
 
