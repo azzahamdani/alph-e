@@ -26,7 +26,7 @@ described in the Notes column.
 | B-01 | Investigator node (real LLM) | in_progress | agent-builder | F-01, F-02, F-03, F-04 | |
 | B-02 | Collectors dispatch (HTTP client + cache) | in_progress | agent-builder | F-04, F-06 | |
 | B-03 | Planner node (RemediationPlan + ActionIntent) | in_progress | agent-builder | F-01, F-02, F-03, F-05 | |
-| B-04 | Dev agent (FixProposal with real diff) | in_progress | agent-builder | F-01, F-02, F-03 | |
+| B-04 | Dev agent (FixProposal with real diff) | done | agent-builder | F-01, F-02, F-03 | |
 | B-05 | Verifier node (dry-run checks) | in_progress | agent-builder | F-01, F-02, F-03 | |
 | B-06 | Reviewer node (PR policy gate) | in_progress | agent-builder | F-01, F-02, F-03 | |
 | B-07 | Coordinator node (exec + escalation) | todo | — | F-05, F-06, B-03 | |
