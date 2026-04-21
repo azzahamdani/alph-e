@@ -8,79 +8,7 @@ The symmetry is deliberate. If the patterns that work for incident response (bou
 
 ## Fleet composition
 
-```mermaid
-flowchart TB
-  subgraph HUMAN["Human"]
-    product["Product owner<br/>(approves ADRs, reviews PRs)"]
-  end
-
-  subgraph ORCH["Orchestration layer"]
-    techlead["Tech Lead agent<br/>(stateful, owns BuildState)"]
-    reviewer["Reviewer agent<br/>(PR review, test gating)"]
-  end
-
-  subgraph SPECIALISTS["Specialists (ephemeral, one task each)"]
-    schema["Schema agent<br/>Pydantic models, enums"]
-    infra["Infra agent<br/>Docker, Ollama, Postgres, MinIO"]
-    evidence["Evidence store agent<br/>blob + metadata, TTL"]
-    collector_loki["Loki collector agent"]
-    collector_tempo["Tempo collector agent"]
-    collector_prom["Prometheus collector agent"]
-    collector_k8s["Kubernetes collector agent"]
-    collector_gh["GitHub collector agent"]
-    intake["Intake agent builder"]
-    investigator["Investigator agent builder"]
-    planner["Planner agent builder"]
-    dev["Dev agent builder"]
-    verifier["Verifier agent builder"]
-    coordinator["Coordinator agent builder"]
-    slack["Slack integration agent"]
-    linear["Linear integration agent"]
-    ghint["GitHub integration agent"]
-    eval["Eval harness agent<br/>seed incidents, golden paths"]
-    docs["Docs agent<br/>README, ADRs, runbooks"]
-  end
-
-  subgraph SUBSTRATE["Shared substrate"]
-    repo["Git repo<br/>(branch per specialist)"]
-    adr["Decision record<br/>(ADRs, architectural notes)"]
-    backlog["Task backlog<br/>(typed work items)"]
-    corpus["Test corpus<br/>(canned incidents)"]
-    ci["CI pipeline<br/>(lint, type, test, integration)"]
-  end
-
-  product -->|goals, constraints| techlead
-  techlead <--> backlog
-  techlead <--> adr
-  techlead -->|dispatch WorkItem| schema
-  techlead -->|dispatch WorkItem| infra
-  techlead -->|dispatch WorkItem| evidence
-  techlead -->|dispatch WorkItem| collector_loki
-  techlead -->|dispatch WorkItem| collector_tempo
-  techlead -->|dispatch WorkItem| collector_prom
-  techlead -->|dispatch WorkItem| collector_k8s
-  techlead -->|dispatch WorkItem| collector_gh
-  techlead -->|dispatch WorkItem| intake
-  techlead -->|dispatch WorkItem| investigator
-  techlead -->|dispatch WorkItem| planner
-  techlead -->|dispatch WorkItem| dev
-  techlead -->|dispatch WorkItem| verifier
-  techlead -->|dispatch WorkItem| coordinator
-  techlead -->|dispatch WorkItem| slack
-  techlead -->|dispatch WorkItem| linear
-  techlead -->|dispatch WorkItem| ghint
-  techlead -->|dispatch WorkItem| eval
-  techlead -->|dispatch WorkItem| docs
-
-  SPECIALISTS -->|PR| repo
-  repo --> ci
-  ci --> reviewer
-  reviewer -->|approved| repo
-  reviewer -.->|changes requested| SPECIALISTS
-  reviewer -->|needs ADR| techlead
-  techlead -->|escalate| product
-  corpus --> ci
-```
+![fleet-composition](diagrams/fleet-composition.svg)
 
 ---
 
@@ -143,61 +71,7 @@ The specialist's output is a PR. Not a description of a PR, not a diff in chat �
 
 Phases exist because some work is genuinely serial (schema blocks everything; infra blocks anything that needs a running stack). Within a phase, specialists run in parallel.
 
-```mermaid
-flowchart LR
-  subgraph P1["Phase 1 — Foundation (serial)"]
-    direction TB
-    p1_schema["Schema agent<br/>Pydantic models from class diagram"]
-    p1_infra["Infra agent<br/>docker-compose, Ollama, Postgres, MinIO"]
-    p1_evidence["Evidence store agent<br/>blob interface + TTL"]
-    p1_schema --> p1_infra
-    p1_infra --> p1_evidence
-  end
-
-  subgraph P2["Phase 2 — Collectors (parallel)"]
-    direction TB
-    p2_loki["Loki"]
-    p2_tempo["Tempo"]
-    p2_prom["Prometheus"]
-    p2_k8s["Kubernetes"]
-    p2_gh["GitHub deploys"]
-  end
-
-  subgraph P3["Phase 3 — Agents (partial parallel)"]
-    direction TB
-    p3_intake["Intake"]
-    p3_invest["Investigator"]
-    p3_valid["Validator"]
-    p3_plan["Planner"]
-    p3_dev["Dev"]
-    p3_verify["Verifier"]
-    p3_coord["Coordinator"]
-    p3_intake --> p3_invest
-    p3_invest --> p3_valid
-    p3_invest --> p3_plan
-    p3_plan --> p3_dev
-    p3_dev --> p3_verify
-    p3_verify --> p3_coord
-  end
-
-  subgraph P4["Phase 4 — Integrations (parallel)"]
-    direction TB
-    p4_slack["Slack bot"]
-    p4_linear["Linear API"]
-    p4_gh["GitHub PR API"]
-  end
-
-  subgraph P5["Phase 5 — Eval & polish (parallel, starts early)"]
-    direction TB
-    p5_eval["Eval harness + seed incidents"]
-    p5_docs["Docs & runbooks"]
-  end
-
-  P1 --> P2
-  P2 --> P3
-  P3 --> P4
-  P1 -.->|can start as soon as schema lands| P5
-```
+![execution-dag](diagrams/execution-dag.svg)
 
 Phase 5 is interesting: the eval agent can start building the test corpus as soon as the schema exists. Golden-path incidents are just fixtures under the `IncidentState` type. This gives the reviewer something to run tests against from phase 2 onward, rather than discovering integration problems at the end.
 

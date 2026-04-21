@@ -22,100 +22,7 @@ Designed around two load-bearing constraints:
 
 ## System architecture
 
-```mermaid
-flowchart LR
-  subgraph INPUTS["Inputs"]
-    direction TB
-    slack["Slack message (support)"]
-  end
-
-  subgraph SOURCES["Data sources"]
-    direction TB
-    k8s["Kubernetes"]
-    grafana["Grafana / LGTM"]
-    other["Other sources"]
-  end
-
-  subgraph STORE["Shared state"]
-    direction TB
-    evidence["Evidence store (blobs by evidence_id)"]
-    state["IncidentState (hypotheses, findings, timeline)"]
-  end
-
-  subgraph AGENTS["AI agents"]
-    direction TB
-    intake["Intake agent"]
-    investigator["Investigator (orchestrator)"]
-    collector["Collectors (ephemeral, per-source)"]
-    validator["Hypothesis validator"]
-    planner["Remediation planner"]
-    dev["Dev agent (fix author)"]
-    verifier["Fix verifier (dry-run / plan / diff)"]
-    coordinator["Coordinator (lifecycle)"]
-  end
-
-  subgraph TRACKING["Tracking"]
-    direction TB
-    linear["Linear ticket"]
-  end
-
-  subgraph HUMAN["Human review"]
-    direction TB
-    reviewer["PR reviewer"]
-    oncall["On-call engineer (handoff mode)"]
-  end
-
-  subgraph OUTPUTS["Outputs"]
-    direction TB
-    pr["Pull request"]
-    ops["Operational action (rollback / scale / flag)"]
-    escalation["Slack #devops (structured handoff)"]
-  end
-
-  slack --> intake
-  intake -->|create| linear
-  intake --> investigator
-
-  investigator <-->|hypothesis-framed questions, N loops| collector
-  collector --> k8s
-  collector --> grafana
-  collector --> other
-  k8s --> collector
-  grafana --> collector
-  other --> collector
-  collector -->|raw payload| evidence
-  collector -->|summary + evidence_id| investigator
-
-  investigator <-->|confirm / falsify| validator
-  investigator <--> state
-  validator -.->|reads| evidence
-
-  investigator -->|root cause + evidence refs| planner
-
-  planner -->|type = pr| dev
-  planner -->|type = rollback/scale/flag/runbook| coordinator
-  planner -->|type = none / insufficient| coordinator
-
-  dev -.->|reads| evidence
-  dev --> verifier
-  verifier -->|pass| pr
-  verifier -->|fail| dev
-
-  pr --> reviewer
-  reviewer -->|approved| coordinator
-  reviewer -->|changes on fix| dev
-  reviewer -->|challenges root cause| investigator
-
-  coordinator -->|update status| linear
-  coordinator -->|execute + log| ops
-
-  investigator -.->|attempts exhausted| coordinator
-  coordinator -->|structured summary| escalation
-  escalation --> oncall
-  oncall -.->|continues in ticket, agent available as tool| investigator
-
-  linear -.->|iterate on feedback| investigator
-```
+![system-architecture](diagrams/system-architecture.svg)
 
 ---
 
@@ -140,40 +47,7 @@ The split between Investigator and Coordinator matters: the Investigator's promp
 
 Four layers, each with a different lifetime and retrieval pattern:
 
-```mermaid
-flowchart TB
-  subgraph WORKING["Working state (in-context)"]
-    incident["IncidentState<br/>alert, hypotheses, findings,<br/>timeline, current focus"]
-  end
-
-  subgraph SEMANTIC["Semantic memory (retrieved per step)"]
-    runbooks["Runbooks"]
-    arch["Architecture docs"]
-    catalog["Service catalog"]
-    slos["SLOs"]
-  end
-
-  subgraph EPISODIC["Episodic memory (retrieved at intake)"]
-    past["Past incidents<br/>symptoms -> root cause -> fix<br/>vector-indexed"]
-  end
-
-  subgraph ENTITY["Entity memory (cached)"]
-    services["Per-service fact sheets<br/>owners, deps, recent deploys"]
-  end
-
-  subgraph EVIDENCE["Evidence store (by ID)"]
-    blobs["Raw log / trace / metric / diff payloads<br/>S3 or Postgres, TTL-bounded"]
-  end
-
-  investigator[Investigator] --> incident
-  investigator -.-> SEMANTIC
-  investigator -.-> EPISODIC
-  investigator -.-> ENTITY
-  collector[Collector] -.->|writes| blobs
-  collector -->|references| incident
-  verifier[Verifier] -.->|reads| blobs
-  dev[Dev agent] -.->|reads| blobs
-```
+![memory-architecture](diagrams/memory-architecture.svg)
 
 **Key boundaries:**
 
@@ -187,226 +61,7 @@ flowchart TB
 
 ## State schema
 
-```mermaid
-classDiagram
-    direction LR
-
-    class IncidentState {
-        +str incident_id
-        +Alert alert
-        +Hypothesis[] hypotheses
-        +Finding[] findings
-        +TimelineEvent[] timeline
-        +Action[] actions_taken
-        +str[] services_touched
-        +str current_focus_hypothesis_id
-        +int investigation_attempts
-        +IncidentPhase phase
-        +datetime created_at
-        +datetime updated_at
-    }
-
-    class Alert {
-        +str source
-        +str raw_message
-        +str service
-        +Severity severity
-        +datetime fired_at
-        +dict labels
-    }
-
-    class Hypothesis {
-        +str id
-        +str text
-        +float score
-        +HypothesisStatus status
-        +str[] supporting_evidence_ids
-        +str[] refuting_evidence_ids
-        +datetime created_at
-    }
-
-    class Finding {
-        +str id
-        +str collector_name
-        +str question
-        +str summary
-        +str evidence_id
-        +float confidence
-        +str[] suggested_followups
-        +datetime created_at
-    }
-
-    class TimelineEvent {
-        +datetime ts
-        +str actor
-        +str event_type
-        +str ref_id
-    }
-
-    class Action {
-        +str id
-        +ActionType type
-        +str description
-        +ActionStatus status
-        +str ref_id
-        +datetime executed_at
-    }
-
-    class CollectorInput {
-        +str question
-        +str hypothesis_id
-        +TimeRange time_range
-        +str[] scope_services
-        +int max_internal_iterations
-    }
-
-    class CollectorOutput {
-        +Finding finding
-        +EvidenceRef evidence
-        +int tool_calls_used
-        +int tokens_used
-    }
-
-    class EvidenceRef {
-        +str evidence_id
-        +str storage_uri
-        +str content_type
-        +int size_bytes
-        +datetime expires_at
-    }
-
-    class RemediationPlan {
-        +str id
-        +RemediationType type
-        +str rationale
-        +str[] evidence_ids
-        +str[] target_repos
-        +str[] target_services
-        +str rollback_plan
-        +float confidence
-        +bool requires_human_approval
-    }
-
-    class FixProposal {
-        +str id
-        +str plan_id
-        +str branch_name
-        +FileChange[] changes
-        +str commit_message
-        +str pr_body
-    }
-
-    class FileChange {
-        +str repo
-        +str path
-        +str diff
-    }
-
-    class VerificationResult {
-        +bool passed
-        +str[] checks_run
-        +str[] failures
-        +str dry_run_output
-    }
-
-    class PullRequest {
-        +str url
-        +int number
-        +str repo
-        +str status
-        +str[] reviewers
-    }
-
-    class EscalationPackage {
-        +str incident_id
-        +Hypothesis[] hypotheses_considered
-        +Finding[] key_findings
-        +RemediationPlan[] attempts
-        +str[] attempt_failure_reasons
-        +str current_working_theory
-        +str suggested_next_steps
-    }
-
-    class HypothesisStatus {
-        <<enum>>
-        open
-        confirmed
-        refuted
-        abandoned
-    }
-
-    class RemediationType {
-        <<enum>>
-        pr
-        rollback
-        scale
-        flag_flip
-        runbook
-        none
-    }
-
-    class IncidentPhase {
-        <<enum>>
-        intake
-        investigating
-        planning
-        fixing
-        verifying
-        reviewing
-        escalated
-        resolved
-    }
-
-    class ActionType {
-        <<enum>>
-        query
-        fix_attempt
-        rollback
-        scale
-        flag_flip
-        notification
-    }
-
-    class ActionStatus {
-        <<enum>>
-        pending
-        executing
-        succeeded
-        failed
-    }
-
-    class Severity {
-        <<enum>>
-        critical
-        high
-        medium
-        low
-    }
-
-    IncidentState "1" *-- "1" Alert
-    IncidentState "1" *-- "many" Hypothesis
-    IncidentState "1" *-- "many" Finding
-    IncidentState "1" *-- "many" TimelineEvent
-    IncidentState "1" *-- "many" Action
-
-    Finding "1" --> "1" EvidenceRef : evidence_id
-    Hypothesis "1" --> "many" EvidenceRef : supporting or refuting
-
-    CollectorInput ..> Hypothesis : references
-    CollectorOutput *-- Finding
-    CollectorOutput *-- EvidenceRef
-
-    RemediationPlan "1" --> "many" Finding : cites
-    FixProposal "1" --> "1" RemediationPlan : plan_id
-    FixProposal "1" *-- "many" FileChange
-
-    VerificationResult ..> FixProposal : verifies
-    PullRequest ..> FixProposal : created_from
-
-    EscalationPackage "1" *-- "many" Hypothesis
-    EscalationPackage "1" *-- "many" Finding
-    EscalationPackage "1" *-- "many" RemediationPlan
-```
+![state-schema](diagrams/state-schema.svg)
 
 **Deliberate choices:**
 
@@ -466,16 +121,7 @@ CollectorOutput(
 
 The pre-flight gate that prevents the system from forcing PRs when the right action is operational:
 
-```mermaid
-flowchart LR
-  investigator["Investigator:<br/>root cause + confidence"] --> planner["Remediation planner"]
-  planner -->|type = pr| dev["Dev agent -> PR"]
-  planner -->|type = rollback| roll["Coordinator -> kubectl / ArgoCD rollback"]
-  planner -->|type = scale| scale["Coordinator -> HPA / replica adjust"]
-  planner -->|type = flag_flip| flag["Coordinator -> LaunchDarkly / Unleash"]
-  planner -->|type = runbook| run["Coordinator -> execute runbook step"]
-  planner -->|type = none| handoff["Coordinator -> escalation"]
-```
+![remediation-decision](diagrams/remediation-decision.svg)
 
 **Rules:**
 
@@ -490,24 +136,7 @@ flowchart LR
 
 Escalation is a **handoff**, not a failure. The on-call engineer receives a structured package and the agent stays available as a tool.
 
-```mermaid
-sequenceDiagram
-    participant I as Investigator
-    participant C as Coordinator
-    participant S as Slack #devops
-    participant O as On-call
-    participant L as Linear
-
-    I->>I: attempt N failed or confidence below threshold
-    I->>C: EscalationPackage
-    C->>L: update ticket status = escalated
-    C->>S: post structured summary + evidence links
-    S->>O: notification
-    O->>I: ask follow-up question (agent as tool)
-    I->>O: answer from IncidentState + evidence store
-    Note over O,I: agent retains context; human leads
-    O->>L: resolve or continue manually
-```
+![escalation-sequence](diagrams/escalation-sequence.svg)
 
 **What the EscalationPackage contains** (not "I failed 3 times"):
 
@@ -523,23 +152,7 @@ sequenceDiagram
 
 Investigation phases that generate a lot of tokens internally but only need to return a conclusion run as **subagents with their own context windows**. The orchestrator sends a task, the subagent burns tokens locally, returns a structured finding.
 
-```mermaid
-flowchart TB
-  orch["Orchestrator<br/>(lead investigator)"] 
-  orch -->|dispatch| loki["Loki collector"]
-  orch -->|dispatch| tempo["Tempo collector"]
-  orch -->|dispatch| prom["Prometheus collector"]
-  orch -->|dispatch| kube["Kubernetes collector"]
-  orch -->|dispatch| gh["GitHub collector<br/>(recent deploys/PRs)"]
-  orch -->|dispatch| hist["Historical incidents<br/>(episodic memory)"]
-
-  loki -->|Finding| orch
-  tempo -->|Finding| orch
-  prom -->|Finding| orch
-  kube -->|Finding| orch
-  gh -->|Finding| orch
-  hist -->|Finding| orch
-```
+![subagents-dispatch](diagrams/subagents-dispatch.svg)
 
 **Cost tactics:**
 
@@ -710,34 +323,7 @@ On Apple Silicon, remove the `deploy.resources` block — Docker on Mac can't pa
 
 Local models handle tool-calling mechanics convincingly but show their seams on hypothesis synthesis under ambiguity and nuanced PR authoring. The practical pattern for production is **local collectors, cloud orchestrator**:
 
-```mermaid
-flowchart LR
-  subgraph LOCAL["Local (GPT-OSS 20B via Ollama)"]
-    direction TB
-    loki_c["Loki collector"]
-    tempo_c["Tempo collector"]
-    prom_c["Prom collector"]
-    k8s_c["k8s collector"]
-    gh_c["GitHub collector"]
-  end
-
-  subgraph CLOUD["Cloud (Claude Sonnet)"]
-    direction TB
-    intake_c["Intake"]
-    invest_c["Investigator"]
-    plan_c["Planner"]
-    dev_c["Dev agent"]
-    verify_c["Verifier"]
-    coord_c["Coordinator"]
-  end
-
-  intake_c --> invest_c
-  invest_c <-->|cheap, high-volume queries| LOCAL
-  invest_c --> plan_c
-  plan_c --> dev_c
-  dev_c --> verify_c
-  verify_c --> coord_c
-```
+![mixed-deployment](diagrams/mixed-deployment.svg)
 
 **Rationale:** collectors are high-volume and mechanical — they benefit from being local (no per-call cost, low latency, data never leaves the VPC). The orchestrator and dev agent are low-volume but high-stakes — they benefit from frontier-model reasoning. This split typically cuts cloud spend by 70%+ versus all-cloud while keeping the hard-reasoning quality where it matters.
 
