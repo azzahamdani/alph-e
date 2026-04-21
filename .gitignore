@@ -3,6 +3,7 @@
 
 # Claude Code local-only settings
 .claude/settings.local.json
+.claude/worktrees/
 
 # Python
 __pycache__/
