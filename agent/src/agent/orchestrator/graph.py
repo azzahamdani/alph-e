@@ -18,7 +18,7 @@ if TYPE_CHECKING:  # pragma: no cover — type-only import
     from langgraph.graph.state import CompiledStateGraph
 
 
-def build_graph(*, checkpointer: Any | None = None) -> "CompiledStateGraph":
+def build_graph(*, checkpointer: Any | None = None) -> CompiledStateGraph:
     """Compile and return the orchestrator graph.
 
     ``checkpointer`` is optional so tests can compile without Postgres. Production

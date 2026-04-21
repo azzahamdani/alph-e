@@ -18,7 +18,7 @@ if TYPE_CHECKING:  # pragma: no cover — type-only import
 
 
 @asynccontextmanager
-async def postgres_checkpointer(postgres_url: str | None = None) -> "AsyncIterator[Any]":
+async def postgres_checkpointer(postgres_url: str | None = None) -> AsyncIterator[Any]:
     """Yield a LangGraph Postgres checkpointer bound to ``postgres_url``.
 
     Defers the ``langgraph-checkpoint-postgres`` import so the skeleton can

@@ -30,8 +30,8 @@ from agent.schemas import (
     RemediationPlan,
     RemediationType,
     Severity,
-    TimeRange,
     TimelineEvent,
+    TimeRange,
     VerifierResult,
     VerifierResultKind,
 )
