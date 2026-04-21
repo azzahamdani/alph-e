@@ -101,3 +101,12 @@ markers = [
     "e2e: full stack required (cluster + monitoring + infra + agent)",
 ]
 asyncio_mode = "auto"
+
+[dependency-groups]
+dev = [
+    "mypy>=1.20.2",
+    "pytest>=9.0.3",
+    "pytest-asyncio>=1.3.0",
+    "pytest-mock>=3.15.1",
+    "ruff>=0.15.11",
+]

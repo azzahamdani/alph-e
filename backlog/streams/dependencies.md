@@ -14,7 +14,7 @@ described in the Notes column.
 | F-01 | Anthropic LLM client + prompt caching | todo | — | — | |
 | F-02 | Prompt loader with system.md prefix | todo | — | — | |
 | F-03 | Structured-output helper (Pydantic + retry) | todo | — | F-01 | |
-| F-04 | LLM-call observability (structlog + cost) | todo | — | F-01 | |
+| F-04 | LLM-call observability (structlog + cost) | done | — | F-01 | |
 | F-05 | ActionIntent signer / verifier | todo | — | — | |
 | F-06 | Evidence client — MinIO + Postgres impl | todo | — | — | |
 | F-07 | Postgres checkpointer integration test | todo | — | F-06 | |
