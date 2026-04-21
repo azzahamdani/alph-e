@@ -87,13 +87,38 @@ task agent-infra:minio      # port-forward localhost:9000
 
 ## Current status (as of 2026-04-21)
 
-All tasks are being dispatched in Wave 1. See `backlog/streams/dependencies.md` for live status.
+**All 21 stream tasks are `done`. MVP1 build is complete.**
 
-### What exists (skeleton)
-- All 8 orchestrator nodes under `agent/src/agent/orchestrator/nodes/` — stubs only
-- `EvidenceClient` in `agent/src/agent/evidence/client.py` — `NotImplementedError` stubs
-- Three Go collector binaries using `NullWriter` with fake findings
-- LangGraph graph wired with routing edges; planner always returns `type=none`
+### What was built
 
-### What needs building (stream tasks)
-See `backlog/streams/dependencies.md` for all tasks and their status.
+**Alpha — Python plumbing (F-01 through F-07):**
+- `agent/src/agent/llm/` — Anthropic client with prompt caching, structured output helper, observability
+- `agent/src/agent/prompts/` — Prompt loader with role-specific system prompts
+- `agent/src/agent/security/action_intent.py` — Ed25519 signer/verifier for ActionIntents
+- `agent/src/agent/evidence/client.py` — Real MinIO + Postgres evidence client
+- `agent/tests/integration/test_checkpoint.py` — Postgres checkpointer integration test
+
+**Beta — reasoning nodes (B-01 through B-07):**
+- `agent/src/agent/orchestrator/nodes/investigator.py` — LLM-driven hypothesis loop
+- `agent/src/agent/orchestrator/nodes/collectors.py` — HTTP dispatch to Go collectors with cache
+- `agent/src/agent/orchestrator/nodes/planner.py` — RemediationPlan + signed ActionIntent
+- `agent/src/agent/orchestrator/nodes/dev.py` — FixProposal with real diff via unidiff
+- `agent/src/agent/orchestrator/nodes/verifier.py` — git apply + kubectl dry-run checks
+- `agent/src/agent/orchestrator/nodes/reviewer.py` — PR policy gate (hard rules + LLM soft judgement)
+- `agent/src/agent/orchestrator/nodes/coordinator.py` — Deterministic lifecycle: verify → preflight → exec → escalate
+
+**Gamma — Go collectors (C-01 through C-04):**
+- `collectors/internal/evidence/minio_writer.go` — MinIO-backed evidence writer
+- `collectors/internal/prom/` — Real PromQL dispatch
+- `collectors/internal/loki/` — Real LogQL dispatch
+- `collectors/internal/kube/` — Real client-go dispatch (read-only)
+
+**Cross-track (X-01):**
+- `agent/tests/integration/test_e2e_oom_alert.py` — End-to-end: OOM alert → Investigator → Planner → Coordinator (mocked LLM, no live deps)
+
+### What's next (post-MVP1)
+
+1. **Live cluster run**: `task up` → `task agent-infra:install` → `task agent:serve` → `task agent:fire` to fire the real OOM alert
+2. **Integration tests with real infra**: `task agent:test -- -m integration` (needs Postgres + MinIO up)
+3. **Haiku for Intake/Coordinator**: swap `claude-sonnet-4-6` to `claude-haiku-4-5-20251001` for faster/cheaper routing nodes
+4. **PR submission**: Coordinator's `type=pr` path triggers Dev → Verifier → Reviewer → real GitHub PR
