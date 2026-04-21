@@ -61,8 +61,31 @@ func main() {
 	flag.Parse()
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+
+	var w evidence.Writer
+	minioCfg, err := evidence.MinioConfigFromEnv()
+	if err != nil {
+		logger.Warn("MinIO env vars not set — falling back to NullWriter (no evidence persisted)",
+			slog.String("reason", err.Error()))
+		w = evidence.NullWriter{Bucket: *bucket}
+	} else {
+		mw, mwErr := evidence.NewMinioWriter(context.Background(), minioCfg)
+		if mwErr != nil {
+			logger.Warn("MinioWriter init failed — falling back to NullWriter",
+				slog.String("reason", mwErr.Error()),
+				slog.String("endpoint", minioCfg.Endpoint),
+				slog.String("bucket", minioCfg.Bucket))
+			w = evidence.NullWriter{Bucket: *bucket}
+		} else {
+			logger.Info("MinioWriter active",
+				slog.String("endpoint", minioCfg.Endpoint),
+				slog.String("bucket", minioCfg.Bucket))
+			w = mw
+		}
+	}
+
 	c := &promCollector{
-		writer: evidence.NullWriter{Bucket: *bucket},
+		writer: w,
 		logger: logger,
 	}
 	srv := &server.Server{Collector: c, Logger: logger}
