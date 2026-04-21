@@ -1,0 +1,44 @@
+apiVersion: k3d.io/v1alpha5
+kind: Simple
+metadata:
+  name: devops-agent
+servers: 1
+agents: 2
+image: rancher/k3s:v1.31.4-k3s1
+kubeAPI:
+  host: "0.0.0.0"
+  hostIP: "127.0.0.1"
+  hostPort: "6443"
+ports:
+  # Grafana
+  - port: 3000:3000
+    nodeFilters:
+      - loadbalancer
+  # Prometheus
+  - port: 9090:9090
+    nodeFilters:
+      - loadbalancer
+  # Alertmanager
+  - port: 9093:9093
+    nodeFilters:
+      - loadbalancer
+  # Demo app
+  - port: 8080:8080
+    nodeFilters:
+      - loadbalancer
+registries:
+  create:
+    name: registry.localhost
+    host: "0.0.0.0"
+    hostPort: "5000"
+options:
+  k3s:
+    extraArgs:
+      # Disable Traefik — we use the built-in LB + port mappings above
+      - arg: --disable=traefik
+        nodeFilters:
+          - server:*
+      # Disable ServiceLB since we map ports via k3d
+      - arg: --disable=servicelb
+        nodeFilters:
+          - server:*

@@ -1,0 +1,156 @@
+# Taskfile for the DevOps Agent lab.
+# Install: https://taskfile.dev/installation/
+# Usage:   task cluster:up && task monitoring:install && task demo:deploy
+
+version: "3"
+
+vars:
+  CLUSTER_NAME: devops-agent
+  REGISTRY: registry.localhost:5000
+  MONITORING_NS: monitoring
+
+tasks:
+
+  # ── Cluster lifecycle ────────────────────────────────────────────────
+
+  cluster:up:
+    desc: Create the k3d cluster with registry and port mappings
+    cmds:
+      - k3d cluster create --config cluster/k3d-config.yaml
+      - kubectl cluster-info
+      - kubectl wait --for=condition=Ready nodes --all --timeout=120s
+
+  cluster:down:
+    desc: Delete the cluster (registry is kept — use cluster:nuke to remove it)
+    cmds:
+      - k3d cluster delete {{.CLUSTER_NAME}}
+
+  cluster:nuke:
+    desc: Delete cluster AND the local registry
+    cmds:
+      - k3d cluster delete {{.CLUSTER_NAME}} || true
+      - k3d registry delete registry.localhost || true
+
+  cluster:status:
+    desc: Show cluster health at a glance
+    cmds:
+      - kubectl get nodes -o wide
+      - kubectl get pods -A
+
+  # ── Monitoring stack ─────────────────────────────────────────────────
+
+  monitoring:repos:
+    desc: Add Helm repos for monitoring stack
+    cmds:
+      - helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+      - helm repo add grafana https://grafana.github.io/helm-charts
+      - helm repo update
+
+  monitoring:install:
+    desc: Install kube-prometheus-stack, Loki, and Alloy
+    deps: [monitoring:repos]
+    cmds:
+      - kubectl create namespace {{.MONITORING_NS}} --dry-run=client -o yaml | kubectl apply -f -
+      - |
+        helm upgrade --install kps prometheus-community/kube-prometheus-stack \
+          --namespace {{.MONITORING_NS}} \
+          --values monitoring/kube-prometheus-stack.values.yaml \
+          --wait --timeout 10m
+      - |
+        helm upgrade --install loki grafana/loki \
+          --namespace {{.MONITORING_NS}} \
+          --values monitoring/loki.values.yaml \
+          --wait --timeout 5m
+      - |
+        helm upgrade --install alloy grafana/alloy \
+          --namespace {{.MONITORING_NS}} \
+          --values monitoring/alloy.values.yaml \
+          --wait --timeout 5m
+      - task: monitoring:loki-datasource
+
+  monitoring:loki-datasource:
+    desc: Register Loki as a Grafana datasource
+    cmds:
+      - |
+        kubectl apply -n {{.MONITORING_NS}} -f - <<EOF
+        apiVersion: v1
+        kind: ConfigMap
+        metadata:
+          name: loki-datasource
+          labels:
+            grafana_datasource: "1"
+        data:
+          loki.yaml: |
+            apiVersion: 1
+            datasources:
+              - name: Loki
+                type: loki
+                access: proxy
+                url: http://loki.{{.MONITORING_NS}}.svc.cluster.local:3100
+                isDefault: false
+        EOF
+
+  monitoring:uninstall:
+    desc: Remove the monitoring stack
+    cmds:
+      - helm uninstall alloy -n {{.MONITORING_NS}} || true
+      - helm uninstall loki -n {{.MONITORING_NS}} || true
+      - helm uninstall kps -n {{.MONITORING_NS}} || true
+
+  # ── Demo app ─────────────────────────────────────────────────────────
+
+  demo:build:
+    desc: Build and push the leaky-service image to the local registry
+    dir: demo-app
+    cmds:
+      - docker build -t {{.REGISTRY}}/leaky-service:latest .
+      - docker push {{.REGISTRY}}/leaky-service:latest
+
+  demo:deploy:
+    desc: Deploy the leaky-service demo app
+    deps: [demo:build]
+    cmds:
+      - kubectl apply -f demo-app/manifests.yaml
+      - kubectl -n demo rollout status deployment/leaky-service --timeout=120s
+
+  demo:undeploy:
+    desc: Remove the demo app
+    cmds:
+      - kubectl delete -f demo-app/manifests.yaml --ignore-not-found
+
+  demo:watch:
+    desc: Watch the pod go through OOM cycles
+    cmds:
+      - kubectl -n demo get pods -w
+
+  demo:logs:
+    desc: Tail the demo app logs
+    cmds:
+      - kubectl -n demo logs -f deployment/leaky-service
+
+  demo:describe:
+    desc: Describe the current pod (shows OOMKilled in Events)
+    cmds:
+      - kubectl -n demo describe pod -l app=leaky-service
+
+  # ── Everything ───────────────────────────────────────────────────────
+
+  up:
+    desc: Full bootstrap — cluster + monitoring + demo app
+    cmds:
+      - task: cluster:up
+      - task: monitoring:install
+      - task: demo:deploy
+      - task: urls
+
+  urls:
+    desc: Print the URLs for Grafana/Prometheus/Alertmanager
+    cmds:
+      - |
+        echo ""
+        echo "  Grafana:      http://localhost:3000  (admin / admin)"
+        echo "  Prometheus:   http://localhost:9090"
+        echo "  Alertmanager: http://localhost:9093"
+        echo ""
+        echo "  Watch the OOM loop:   task demo:watch"
+        echo ""
