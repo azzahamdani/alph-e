@@ -13,8 +13,8 @@ described in the Notes column.
 |---|---|---|---|---|---|
 | F-01 | Anthropic LLM client + prompt caching | done | agent-builder | — | |
 | F-02 | Prompt loader with system.md prefix | done | agent-builder | — | |
-| F-03 | Structured-output helper (Pydantic + retry) | todo | — | F-01 | |
-| F-04 | LLM-call observability (structlog + cost) | todo | — | F-01 | |
+| F-03 | Structured-output helper (Pydantic + retry) | in_progress | agent-builder | F-01 | |
+| F-04 | LLM-call observability (structlog + cost) | in_progress | agent-builder | F-01 | |
 | F-05 | ActionIntent signer / verifier | done | agent-builder | — | |
 | F-06 | Evidence client — MinIO + Postgres impl | done | evidence-specialist | — | |
 | F-07 | Postgres checkpointer integration test | todo | — | F-06 | |
@@ -36,9 +36,9 @@ described in the Notes column.
 | ID | Subject | Status | Owner | Blocked by | Notes |
 |---|---|---|---|---|---|
 | C-01 | MinIO-backed evidence Writer | done | collector-specialist | — | |
-| C-02 | prom-collector real PromQL dispatch | todo | — | C-01 | |
-| C-03 | loki-collector real LogQL dispatch | todo | — | C-01 | |
-| C-04 | kube-collector real client-go dispatch | todo | — | C-01 | |
+| C-02 | prom-collector real PromQL dispatch | in_progress | collector-specialist | C-01 | |
+| C-03 | loki-collector real LogQL dispatch | in_progress | collector-specialist | C-01 | |
+| C-04 | kube-collector real client-go dispatch | in_progress | collector-specialist | C-01 | |
 
 ## Cross-track integration
 
