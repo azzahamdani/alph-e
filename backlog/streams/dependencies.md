@@ -14,7 +14,7 @@ described in the Notes column.
 | F-01 | Anthropic LLM client + prompt caching | done | agent-builder | — | |
 | F-02 | Prompt loader with system.md prefix | done | agent-builder | — | |
 | F-03 | Structured-output helper (Pydantic + retry) | done | agent-builder | F-01 | |
-| F-04 | LLM-call observability (structlog + cost) | in_progress | agent-builder | F-01 | |
+| F-04 | LLM-call observability (structlog + cost) | done | agent-builder | F-01 | |
 | F-05 | ActionIntent signer / verifier | done | agent-builder | — | |
 | F-06 | Evidence client — MinIO + Postgres impl | done | evidence-specialist | — | |
 | F-07 | Postgres checkpointer integration test | todo | — | F-06 | |
