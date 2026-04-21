@@ -37,8 +37,8 @@ described in the Notes column.
 |---|---|---|---|---|---|
 | C-01 | MinIO-backed evidence Writer | done | collector-specialist | — | |
 | C-02 | prom-collector real PromQL dispatch | done | collector-specialist | C-01 | |
-| C-03 | loki-collector real LogQL dispatch | in_progress | collector-specialist | C-01 | |
-| C-04 | kube-collector real client-go dispatch | in_progress | collector-specialist | C-01 | |
+| C-03 | loki-collector real LogQL dispatch | done | collector-specialist | C-01 | |
+| C-04 | kube-collector real client-go dispatch | done | collector-specialist | C-01 | |
 
 ## Cross-track integration
 
