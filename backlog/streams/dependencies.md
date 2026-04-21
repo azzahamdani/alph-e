@@ -17,18 +17,18 @@ described in the Notes column.
 | F-04 | LLM-call observability (structlog + cost) | done | agent-builder | F-01 | |
 | F-05 | ActionIntent signer / verifier | done | agent-builder | — | |
 | F-06 | Evidence client — MinIO + Postgres impl | done | evidence-specialist | — | |
-| F-07 | Postgres checkpointer integration test | todo | — | F-06 | |
+| F-07 | Postgres checkpointer integration test | in_progress | agent-builder | F-06 | |
 
 ## Beta — reasoning nodes
 
 | ID | Subject | Status | Owner | Blocked by | Notes |
 |---|---|---|---|---|---|
-| B-01 | Investigator node (real LLM) | todo | — | F-01, F-02, F-03, F-04 | |
-| B-02 | Collectors dispatch (HTTP client + cache) | todo | — | F-04, F-06 | |
-| B-03 | Planner node (RemediationPlan + ActionIntent) | todo | — | F-01, F-02, F-03, F-05 | |
-| B-04 | Dev agent (FixProposal with real diff) | todo | — | F-01, F-02, F-03 | |
-| B-05 | Verifier node (dry-run checks) | todo | — | F-01, F-02, F-03 | |
-| B-06 | Reviewer node (PR policy gate) | todo | — | F-01, F-02, F-03 | |
+| B-01 | Investigator node (real LLM) | in_progress | agent-builder | F-01, F-02, F-03, F-04 | |
+| B-02 | Collectors dispatch (HTTP client + cache) | in_progress | agent-builder | F-04, F-06 | |
+| B-03 | Planner node (RemediationPlan + ActionIntent) | in_progress | agent-builder | F-01, F-02, F-03, F-05 | |
+| B-04 | Dev agent (FixProposal with real diff) | in_progress | agent-builder | F-01, F-02, F-03 | |
+| B-05 | Verifier node (dry-run checks) | in_progress | agent-builder | F-01, F-02, F-03 | |
+| B-06 | Reviewer node (PR policy gate) | in_progress | agent-builder | F-01, F-02, F-03 | |
 | B-07 | Coordinator node (exec + escalation) | todo | — | F-05, F-06, B-03 | |
 
 ## Gamma — Go collectors
