@@ -133,6 +133,44 @@ tasks:
     cmds:
       - kubectl -n demo describe pod -l app=leaky-service
 
+  # ── Grafana MCP server ───────────────────────────────────────────────
+
+  mcp:token:
+    desc: Create/refresh the Grafana service account token and store it as a Secret
+    cmds:
+      - bash mcp/bootstrap-token.sh
+
+  mcp:install:
+    desc: Deploy the Grafana MCP server into the cluster
+    cmds:
+      - kubectl apply -f mcp/manifests.yaml
+      - |
+        if ! kubectl -n mcp get secret grafana-mcp-token >/dev/null 2>&1; then
+          echo ""
+          echo "⚠  Secret 'grafana-mcp-token' not found — MCP pod will fail until you run:"
+          echo "    task grafana          # in a separate terminal"
+          echo "    task mcp:token        # creates the SA token and the Secret"
+          echo ""
+        fi
+      - kubectl -n mcp rollout status deployment/grafana-mcp --timeout=60s ||
+        true
+
+  mcp:forward:
+    desc: Port-forward the MCP server to http://localhost:8000/mcp
+    cmds:
+      - echo "Grafana MCP → http://localhost:8000/mcp"
+      - kubectl -n mcp port-forward svc/grafana-mcp 8000:8000
+
+  mcp:logs:
+    desc: Tail MCP server logs
+    cmds:
+      - kubectl -n mcp logs -f deployment/grafana-mcp
+
+  mcp:uninstall:
+    desc: Remove the MCP server
+    cmds:
+      - kubectl delete -f mcp/manifests.yaml --ignore-not-found
+
   # ── Everything ───────────────────────────────────────────────────────
 
   up:
