@@ -44,4 +44,4 @@ described in the Notes column.
 
 | ID | Subject | Status | Owner | Blocked by | Notes |
 |---|---|---|---|---|---|
-| X-01 | End-to-end happy path: OOM alert → escalated | todo | — | B-01, B-02, B-03, B-07, C-02, C-03, C-04 | Exercises the full graph with real agents and real collectors against the lab cluster. |
+| X-01 | End-to-end happy path: OOM alert → escalated | done | eval-specialist | B-01, B-02, B-03, B-07, C-02, C-03, C-04 | MVP1 harness: OOM alert → Investigator → Planner → Coordinator (stubs, no live deps). |
