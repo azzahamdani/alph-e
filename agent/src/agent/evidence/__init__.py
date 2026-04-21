@@ -9,5 +9,18 @@ Invariants (see arch doc, 'Evidence store'):
 """
 
 from agent.evidence.client import EvidenceClient, EvidenceSettings
+from agent.evidence.errors import (
+    EvidenceError,
+    EvidenceMetadataError,
+    EvidenceNotFound,
+    EvidenceStorageError,
+)
 
-__all__ = ["EvidenceClient", "EvidenceSettings"]
+__all__ = [
+    "EvidenceClient",
+    "EvidenceSettings",
+    "EvidenceError",
+    "EvidenceMetadataError",
+    "EvidenceNotFound",
+    "EvidenceStorageError",
+]
