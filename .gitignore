@@ -1,0 +1,36 @@
+# macOS
+.DS_Store
+
+# Claude Code local-only settings
+.claude/settings.local.json
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+dist/
+build/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# uv
+.uv_cache/
+
+# Go
+/bin/
+*.test
+*.prof
+*.out
+
+# Node (mermaid-cli etc.)
+node_modules/
+
+# Editor
+.vscode/
+.idea/
+*.swp

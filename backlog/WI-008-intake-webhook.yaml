@@ -1,0 +1,33 @@
+id: WI-008
+title: Intake agent — Alertmanager webhook endpoint
+component: agents.intake
+acceptance_criteria:
+  - FastAPI POST /webhook/alertmanager accepts the Alertmanager v4 webhook schema
+  - Parses alert fields into Alert Pydantic model; creates a new IncidentState with incident_id
+  - Persists initial IncidentState via the LangGraph PostgresSaver checkpointer
+  - Returns 200 with JSON body {"incident_id": "...", "accepted": true}
+  - Rejects payloads that don't match the Alertmanager schema with 400
+  - GET /healthz returns 200
+  - Unit tests with a real Alertmanager sample payload (from tests/fixtures/incidents/oom-leaky-service.json) pass
+  - Integration test: alert -> webhook -> IncidentState row present in Postgres
+  - Linear ticket creation stubbed (NotImplementedError with clear message — MVP1 defers Linear)
+interface_contracts:
+  - agent/src/agent/schemas/incident.py (Alert, IncidentState)
+  - agent/src/agent/evidence/client.py (for initial state persistence)
+relevant_adrs:
+  - ADR-0004
+  - ADR-0005
+allowed_paths:
+  - agent/src/agent/intake/**
+  - agent/tests/unit/test_intake_*.py
+  - agent/tests/integration/test_intake_*.py
+  - agent/tests/fixtures/incidents/oom-leaky-service.json
+blocked_paths:
+  - agent/src/agent/schemas/**
+  - agent/src/agent/orchestrator/**
+  - collectors/**
+depends_on:
+  - WI-001
+  - WI-003
+estimated_complexity: medium
+max_iterations: 3

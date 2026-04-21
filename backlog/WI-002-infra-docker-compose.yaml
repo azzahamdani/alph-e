@@ -1,0 +1,26 @@
+id: WI-002
+title: Docker Compose with Postgres+pgvector and MinIO
+component: infra.docker-compose
+acceptance_criteria:
+  - docker compose up -d brings up postgres, minio, minio-init cleanly
+  - minio-init creates the `incidents` bucket with a 30-day lifecycle rule
+  - postgres exposes port 5432 with pgvector extension enabled
+  - minio exposes ports 9000 (API) and 9001 (console)
+  - Env-driven config (POSTGRES_PASSWORD, MINIO_ROOT_USER, MINIO_ROOT_PASSWORD)
+  - task infra:up|down|logs|psql all work
+  - README section documents the service URLs and default credentials
+interface_contracts: []
+relevant_adrs:
+  - ADR-0006
+allowed_paths:
+  - infra/**
+  - Taskfile.yml
+  - README.md
+blocked_paths:
+  - agent/**
+  - collectors/**
+  - cluster/**
+  - monitoring/**
+depends_on: []
+estimated_complexity: small
+max_iterations: 2

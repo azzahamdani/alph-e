@@ -1,0 +1,26 @@
+id: WI-014
+title: Wire Alertmanager webhook route to agent
+component: infra.alertmanager
+acceptance_criteria:
+  - monitoring/kube-prometheus-stack.values.yaml has an alertmanager.config block routing namespace=demo alerts to receiver `devops-agent`
+  - Receiver points at http://host.k3d.internal:8000/webhook/alertmanager
+  - helm upgrade --install via task monitoring:install applies cleanly
+  - task monitoring:alerts applies the PrometheusRule in monitoring/alert-rules.yaml
+  - End-to-end test documented in README: kick the OOM, observe the agent's /webhook/alertmanager receive a real payload
+interface_contracts:
+  - monitoring/alert-rules.yaml
+relevant_adrs:
+  - ADR-0005
+allowed_paths:
+  - monitoring/**
+  - Taskfile.yml
+  - README.md
+blocked_paths:
+  - agent/**
+  - collectors/**
+  - cluster/**
+  - demo-app/**
+depends_on:
+  - WI-008
+estimated_complexity: small
+max_iterations: 2

@@ -1,0 +1,30 @@
+id: WI-001
+title: Pydantic schemas for IncidentState and typed contracts
+component: schemas.core
+acceptance_criteria:
+  - All types from docs/diagrams/state-schema.mmd present as Pydantic v2 models
+  - Enums (HypothesisStatus, RemediationType, IncidentPhase, ActionType, ActionStatus, Severity) defined and exported
+  - CollectorInput/CollectorOutput match the code block at docs/devops-agent-architecture.md:88-128 verbatim
+  - EnvironmentFingerprint included (arch doc line 96-102)
+  - Round-trip JSON serialisation tested for every top-level model
+  - mypy --strict passes
+  - ruff check + ruff format --check pass
+interface_contracts:
+  - docs/diagrams/state-schema.mmd
+  - docs/diagrams/state-schema.svg
+  - docs/devops-agent-architecture.md (Collector contract section)
+relevant_adrs:
+  - ADR-0001
+  - ADR-0002
+allowed_paths:
+  - agent/src/agent/schemas/**
+  - agent/tests/unit/test_schemas_*.py
+  - agent/pyproject.toml
+blocked_paths:
+  - agent/src/agent/orchestrator/**
+  - agent/src/agent/intake/**
+  - agent/src/agent/evidence/**
+  - collectors/**
+depends_on: []
+estimated_complexity: medium
+max_iterations: 3

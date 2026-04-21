@@ -1,0 +1,32 @@
+id: WI-009
+title: LangGraph orchestrator graph skeleton
+component: agents.orchestrator
+acceptance_criteria:
+  - StateGraph over IncidentState compiles without error
+  - Nodes exist for: intake, investigator, collectors (subgraph dispatcher), planner, dev, verifier, coordinator
+  - Routing edges match the table at docs/devops-agent-architecture.md:202-213 exactly
+  - PostgresSaver checkpointer wired via environment (POSTGRES_URL)
+  - For MVP1, each node returns a stub result (investigator returns RemediationPlan(type=none), verifier returns VerificationResult(passed=True))
+  - Unit tests cover every routing edge (parametrised)
+  - `python -m agent.orchestrator.graph --compile` exits 0
+interface_contracts:
+  - agent/src/agent/schemas/**
+  - agent/src/agent/evidence/client.py
+relevant_adrs:
+  - ADR-0004
+allowed_paths:
+  - agent/src/agent/orchestrator/**
+  - agent/src/agent/prompts/system.md
+  - agent/tests/unit/test_routing.py
+  - agent/tests/unit/test_graph_*.py
+blocked_paths:
+  - agent/src/agent/schemas/**
+  - agent/src/agent/intake/**
+  - agent/src/agent/evidence/**
+  - collectors/**
+depends_on:
+  - WI-001
+  - WI-003
+  - WI-008
+estimated_complexity: large
+max_iterations: 4

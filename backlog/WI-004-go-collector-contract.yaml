@@ -1,0 +1,30 @@
+id: WI-004
+title: Go shared contract + evidence package for collectors
+component: collectors.internal
+acceptance_criteria:
+  - collectors/internal/contract mirrors agent/src/agent/schemas/collector.py exactly (CollectorInput, CollectorOutput, Finding, EvidenceRef, EnvironmentFingerprint, TimeRange)
+  - Round-trip JSON test against a fixture file that's also consumed by Python tests (contract drift check)
+  - collectors/internal/evidence provides a client mirroring the Python one (Write/Read/Delete/ListByIncident)
+  - golangci-lint run ./... clean
+  - go test ./internal/... passes
+interface_contracts:
+  - agent/src/agent/schemas/collector.py
+  - agent/src/agent/schemas/evidence.py
+relevant_adrs:
+  - ADR-0001
+  - ADR-0003
+  - ADR-0006
+allowed_paths:
+  - collectors/internal/**
+  - collectors/go.mod
+  - collectors/go.sum
+  - collectors/.golangci.yml
+  - collectors/Makefile
+blocked_paths:
+  - collectors/cmd/**
+  - agent/**
+depends_on:
+  - WI-001
+  - WI-003
+estimated_complexity: small
+max_iterations: 2

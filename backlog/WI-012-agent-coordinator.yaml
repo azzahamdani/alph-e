@@ -1,0 +1,30 @@
+id: WI-012
+title: Coordinator role — lifecycle, escalation, action execution stubs
+component: agents.coordinator
+acceptance_criteria:
+  - Handles approved PRs (marks IncidentState.phase=resolved)
+  - Handles operational plans with requires_human_approval=True by pausing the graph (interrupt_after)
+  - Handles escalation by building an EscalationPackage and logging it (Slack send stubbed)
+  - Re-checks ActionIntent preconditions immediately before execution; rejects stale plans with the correct routing per arch doc (diagnosis-invalidating -> Investigator, parameter-only -> Planner, already-resolved -> short-circuit)
+  - For MVP1, operational actions are dry-run only — log what would happen, do not mutate
+  - Unit tests cover every routing branch
+  - coordinator.md prompt committed
+interface_contracts:
+  - agent/src/agent/schemas/incident.py (Action, ActionIntent)
+  - agent/src/agent/schemas/remediation.py
+  - agent/src/agent/schemas/escalation.py
+relevant_adrs:
+  - ADR-0004
+allowed_paths:
+  - agent/src/agent/orchestrator/nodes/coordinator.py
+  - agent/src/agent/prompts/coordinator.md
+  - agent/tests/unit/test_coordinator_*.py
+blocked_paths:
+  - agent/src/agent/schemas/**
+  - agent/src/agent/orchestrator/nodes/!(coordinator).py
+  - collectors/**
+depends_on:
+  - WI-009
+  - WI-011
+estimated_complexity: medium
+max_iterations: 3

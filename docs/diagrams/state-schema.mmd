@@ -1,0 +1,218 @@
+classDiagram
+    direction LR
+
+    class IncidentState {
+        +str incident_id
+        +Alert alert
+        +Hypothesis[] hypotheses
+        +Finding[] findings
+        +TimelineEvent[] timeline
+        +Action[] actions_taken
+        +str[] services_touched
+        +str current_focus_hypothesis_id
+        +int investigation_attempts
+        +IncidentPhase phase
+        +datetime created_at
+        +datetime updated_at
+    }
+
+    class Alert {
+        +str source
+        +str raw_message
+        +str service
+        +Severity severity
+        +datetime fired_at
+        +dict labels
+    }
+
+    class Hypothesis {
+        +str id
+        +str text
+        +float score
+        +HypothesisStatus status
+        +str[] supporting_evidence_ids
+        +str[] refuting_evidence_ids
+        +datetime created_at
+    }
+
+    class Finding {
+        +str id
+        +str collector_name
+        +str question
+        +str summary
+        +str evidence_id
+        +float confidence
+        +str[] suggested_followups
+        +datetime created_at
+    }
+
+    class TimelineEvent {
+        +datetime ts
+        +str actor
+        +str event_type
+        +str ref_id
+    }
+
+    class Action {
+        +str id
+        +ActionType type
+        +str description
+        +ActionStatus status
+        +str ref_id
+        +datetime executed_at
+    }
+
+    class CollectorInput {
+        +str question
+        +str hypothesis_id
+        +TimeRange time_range
+        +str[] scope_services
+        +int max_internal_iterations
+    }
+
+    class CollectorOutput {
+        +Finding finding
+        +EvidenceRef evidence
+        +int tool_calls_used
+        +int tokens_used
+    }
+
+    class EvidenceRef {
+        +str evidence_id
+        +str storage_uri
+        +str content_type
+        +int size_bytes
+        +datetime expires_at
+    }
+
+    class RemediationPlan {
+        +str id
+        +RemediationType type
+        +str rationale
+        +str[] evidence_ids
+        +str[] target_repos
+        +str[] target_services
+        +str rollback_plan
+        +float confidence
+        +bool requires_human_approval
+    }
+
+    class FixProposal {
+        +str id
+        +str plan_id
+        +str branch_name
+        +FileChange[] changes
+        +str commit_message
+        +str pr_body
+    }
+
+    class FileChange {
+        +str repo
+        +str path
+        +str diff
+    }
+
+    class VerificationResult {
+        +bool passed
+        +str[] checks_run
+        +str[] failures
+        +str dry_run_output
+    }
+
+    class PullRequest {
+        +str url
+        +int number
+        +str repo
+        +str status
+        +str[] reviewers
+    }
+
+    class EscalationPackage {
+        +str incident_id
+        +Hypothesis[] hypotheses_considered
+        +Finding[] key_findings
+        +RemediationPlan[] attempts
+        +str[] attempt_failure_reasons
+        +str current_working_theory
+        +str suggested_next_steps
+    }
+
+    class HypothesisStatus {
+        <<enum>>
+        open
+        confirmed
+        refuted
+        abandoned
+    }
+
+    class RemediationType {
+        <<enum>>
+        pr
+        rollback
+        scale
+        flag_flip
+        runbook
+        none
+    }
+
+    class IncidentPhase {
+        <<enum>>
+        intake
+        investigating
+        planning
+        fixing
+        verifying
+        reviewing
+        escalated
+        resolved
+    }
+
+    class ActionType {
+        <<enum>>
+        query
+        fix_attempt
+        rollback
+        scale
+        flag_flip
+        notification
+    }
+
+    class ActionStatus {
+        <<enum>>
+        pending
+        executing
+        succeeded
+        failed
+    }
+
+    class Severity {
+        <<enum>>
+        critical
+        high
+        medium
+        low
+    }
+
+    IncidentState "1" *-- "1" Alert
+    IncidentState "1" *-- "many" Hypothesis
+    IncidentState "1" *-- "many" Finding
+    IncidentState "1" *-- "many" TimelineEvent
+    IncidentState "1" *-- "many" Action
+
+    Finding "1" --> "1" EvidenceRef : evidence_id
+    Hypothesis "1" --> "many" EvidenceRef : supporting or refuting
+
+    CollectorInput ..> Hypothesis : references
+    CollectorOutput *-- Finding
+    CollectorOutput *-- EvidenceRef
+
+    RemediationPlan "1" --> "many" Finding : cites
+    FixProposal "1" --> "1" RemediationPlan : plan_id
+    FixProposal "1" *-- "many" FileChange
+
+    VerificationResult ..> FixProposal : verifies
+    PullRequest ..> FixProposal : created_from
+
+    EscalationPackage "1" *-- "many" Hypothesis
+    EscalationPackage "1" *-- "many" Finding
+    EscalationPackage "1" *-- "many" RemediationPlan

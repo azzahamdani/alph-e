@@ -1,0 +1,23 @@
+id: WI-013
+title: Seed incident corpus — capture OOM alertmanager payload
+component: eval.corpus
+acceptance_criteria:
+  - Captured Alertmanager webhook payload from a real PodOOMKilled firing against leaky-service
+  - Committed as agent/tests/fixtures/incidents/oom-leaky-service.json
+  - Deserialises cleanly into the Alert Pydantic model
+  - README under agent/tests/fixtures/incidents/ explains how to regenerate
+  - Reference parser test confirms the fixture is consumed by WI-008's intake handler
+interface_contracts:
+  - agent/src/agent/schemas/incident.py (Alert)
+relevant_adrs:
+  - ADR-0005
+allowed_paths:
+  - agent/tests/fixtures/incidents/**
+  - agent/tests/integration/test_corpus_*.py
+blocked_paths:
+  - agent/src/agent/**
+  - collectors/**
+depends_on:
+  - WI-001
+estimated_complexity: small
+max_iterations: 2

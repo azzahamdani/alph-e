@@ -1,0 +1,26 @@
+flowchart LR
+  subgraph LOCAL["Local (GPT-OSS 20B via Ollama)"]
+    direction TB
+    loki_c["Loki collector"]
+    tempo_c["Tempo collector"]
+    prom_c["Prom collector"]
+    k8s_c["k8s collector"]
+    gh_c["GitHub collector"]
+  end
+
+  subgraph CLOUD["Cloud (Claude Sonnet)"]
+    direction TB
+    intake_c["Intake"]
+    invest_c["Investigator"]
+    plan_c["Planner"]
+    dev_c["Dev agent"]
+    verify_c["Verifier"]
+    coord_c["Coordinator"]
+  end
+
+  intake_c --> invest_c
+  invest_c <-->|cheap, high-volume queries| LOCAL
+  invest_c --> plan_c
+  plan_c --> dev_c
+  dev_c --> verify_c
+  verify_c --> coord_c

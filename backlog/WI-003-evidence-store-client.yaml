@@ -1,0 +1,32 @@
+id: WI-003
+title: Evidence store client — MinIO blobs + Postgres metadata + TTL
+component: evidence.client
+acceptance_criteria:
+  - write(incident_id, collector_name, content_type, payload_bytes) -> EvidenceRef
+  - read(evidence_id) -> bytes (404 if expired or missing)
+  - delete(evidence_id) - idempotent, removes blob and metadata row
+  - list_by_incident(incident_id) -> list[EvidenceRef]
+  - expires_at defaults to now() + 30 days; overridable per call
+  - Postgres migration 0001_initial.sql creates incidents, evidence, actions_taken tables
+  - Integration tests against local MinIO + Postgres pass (marked @pytest.mark.evidence)
+  - Unit tests mock the S3/Postgres clients
+  - mypy --strict passes
+interface_contracts:
+  - agent/src/agent/schemas/evidence.py (EvidenceRef)
+  - agent/src/agent/schemas/collector.py (CollectorOutput references EvidenceRef)
+relevant_adrs:
+  - ADR-0006
+  - ADR-0002
+allowed_paths:
+  - agent/src/agent/evidence/**
+  - agent/tests/unit/test_evidence_*.py
+  - agent/tests/integration/test_evidence_*.py
+blocked_paths:
+  - agent/src/agent/schemas/**
+  - agent/src/agent/orchestrator/**
+  - collectors/**
+depends_on:
+  - WI-001
+  - WI-002
+estimated_complexity: medium
+max_iterations: 3

@@ -1,0 +1,53 @@
+flowchart LR
+  subgraph P1["Phase 1 — Foundation (serial)"]
+    direction TB
+    p1_schema["Schema agent<br/>Pydantic models from class diagram"]
+    p1_infra["Infra agent<br/>docker-compose, Ollama, Postgres, MinIO"]
+    p1_evidence["Evidence store agent<br/>blob interface + TTL"]
+    p1_schema --> p1_infra
+    p1_infra --> p1_evidence
+  end
+
+  subgraph P2["Phase 2 — Collectors (parallel)"]
+    direction TB
+    p2_loki["Loki"]
+    p2_tempo["Tempo"]
+    p2_prom["Prometheus"]
+    p2_k8s["Kubernetes"]
+    p2_gh["GitHub deploys"]
+  end
+
+  subgraph P3["Phase 3 — Agents (partial parallel)"]
+    direction TB
+    p3_intake["Intake"]
+    p3_invest["Investigator"]
+    p3_valid["Validator"]
+    p3_plan["Planner"]
+    p3_dev["Dev"]
+    p3_verify["Verifier"]
+    p3_coord["Coordinator"]
+    p3_intake --> p3_invest
+    p3_invest --> p3_valid
+    p3_invest --> p3_plan
+    p3_plan --> p3_dev
+    p3_dev --> p3_verify
+    p3_verify --> p3_coord
+  end
+
+  subgraph P4["Phase 4 — Integrations (parallel)"]
+    direction TB
+    p4_slack["Slack bot"]
+    p4_linear["Linear API"]
+    p4_gh["GitHub PR API"]
+  end
+
+  subgraph P5["Phase 5 — Eval & polish (parallel, starts early)"]
+    direction TB
+    p5_eval["Eval harness + seed incidents"]
+    p5_docs["Docs & runbooks"]
+  end
+
+  P1 --> P2
+  P2 --> P3
+  P3 --> P4
+  P1 -.->|can start as soon as schema lands| P5

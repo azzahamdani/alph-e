@@ -1,0 +1,92 @@
+flowchart LR
+  subgraph INPUTS["Inputs"]
+    direction TB
+    slack["Slack message (support)"]
+  end
+
+  subgraph SOURCES["Data sources"]
+    direction TB
+    k8s["Kubernetes"]
+    grafana["Grafana / LGTM"]
+    other["Other sources"]
+  end
+
+  subgraph STORE["Shared state"]
+    direction TB
+    evidence["Evidence store (blobs by evidence_id)"]
+    state["IncidentState (hypotheses, findings, timeline)"]
+  end
+
+  subgraph AGENTS["AI agents"]
+    direction TB
+    intake["Intake agent"]
+    investigator["Investigator (orchestrator)"]
+    collector["Collectors (ephemeral, per-source)"]
+    validator["Hypothesis validator"]
+    planner["Remediation planner"]
+    dev["Dev agent (fix author)"]
+    verifier["Fix verifier (dry-run / plan / diff)"]
+    coordinator["Coordinator (lifecycle)"]
+  end
+
+  subgraph TRACKING["Tracking"]
+    direction TB
+    linear["Linear ticket"]
+  end
+
+  subgraph HUMAN["Human review"]
+    direction TB
+    reviewer["PR reviewer"]
+    oncall["On-call engineer (handoff mode)"]
+  end
+
+  subgraph OUTPUTS["Outputs"]
+    direction TB
+    pr["Pull request"]
+    ops["Operational action (rollback / scale / flag)"]
+    escalation["Slack #devops (structured handoff)"]
+  end
+
+  slack --> intake
+  intake -->|create| linear
+  intake --> investigator
+
+  investigator <-->|hypothesis-framed questions, N loops| collector
+  collector --> k8s
+  collector --> grafana
+  collector --> other
+  k8s --> collector
+  grafana --> collector
+  other --> collector
+  collector -->|raw payload| evidence
+  collector -->|summary + evidence_id| investigator
+
+  investigator <-->|confirm / falsify| validator
+  investigator <--> state
+  validator -.->|reads| evidence
+
+  investigator -->|root cause + evidence refs| planner
+
+  planner -->|type = pr| dev
+  planner -->|type = rollback/scale/flag/runbook| coordinator
+  planner -->|type = none / insufficient| coordinator
+
+  dev -.->|reads| evidence
+  dev --> verifier
+  verifier -->|pass| pr
+  verifier -->|fail| dev
+
+  pr --> reviewer
+  reviewer -->|approved| coordinator
+  reviewer -->|changes on fix| dev
+  reviewer -->|challenges root cause| investigator
+
+  coordinator -->|update status| linear
+  coordinator -->|execute + log| ops
+
+  investigator -.->|attempts exhausted| coordinator
+  coordinator -->|structured summary| escalation
+  escalation --> oncall
+  oncall -.->|continues in ticket, agent available as tool| investigator
+
+  linear -.->|iterate on feedback| investigator

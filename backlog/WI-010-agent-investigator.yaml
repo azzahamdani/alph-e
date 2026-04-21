@@ -1,0 +1,32 @@
+id: WI-010
+title: Investigator role — hypothesis loop with collector dispatch
+component: agents.investigator
+acceptance_criteria:
+  - Node reads IncidentState, generates initial hypotheses from the Alert
+  - Dispatches collector questions in parallel (LangGraph Send) for independent hypotheses
+  - Scores hypotheses against returned Findings; updates IncidentState.hypotheses
+  - Hands off to Planner when a hypothesis crosses confidence_threshold (default 0.85)
+  - Hands off to Coordinator (as type=none) when investigation_attempts exceeds max (default 3) with no confident hypothesis
+  - investigator.md prompt file committed alongside code
+  - Unit tests use a mock Anthropic client; cover: onset, loop-iteration, handoff-to-planner, attempts-exhausted
+  - mypy --strict, ruff check, pytest all pass
+interface_contracts:
+  - agent/src/agent/schemas/incident.py
+  - agent/src/agent/schemas/collector.py
+  - agent/src/agent/orchestrator/graph.py
+relevant_adrs:
+  - ADR-0004
+allowed_paths:
+  - agent/src/agent/orchestrator/nodes/investigator.py
+  - agent/src/agent/prompts/investigator.md
+  - agent/tests/unit/test_investigator_*.py
+blocked_paths:
+  - agent/src/agent/schemas/**
+  - agent/src/agent/intake/**
+  - agent/src/agent/evidence/**
+  - agent/src/agent/orchestrator/nodes/!(investigator).py
+  - collectors/**
+depends_on:
+  - WI-009
+estimated_complexity: large
+max_iterations: 4

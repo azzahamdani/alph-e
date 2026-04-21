@@ -1,0 +1,24 @@
+id: WI-015
+title: Update README and CLAUDE.md with agent/collectors/infra layout
+component: docs.layout
+acceptance_criteria:
+  - README has quick-start sections for: lab cluster (unchanged), agent-side infra, agent, collectors
+  - CLAUDE.md documents the new directory layout (agent/, collectors/, infra/, backlog/, docs/adr/)
+  - Links to the ADR index
+  - No factual claims unbacked by code or existing ADRs
+interface_contracts: []
+relevant_adrs: []
+allowed_paths:
+  - README.md
+  - CLAUDE.md
+  - docs/**
+blocked_paths:
+  - agent/**
+  - collectors/**
+  - infra/**
+  - Taskfile.yml
+depends_on:
+  - WI-009
+  - WI-014
+estimated_complexity: small
+max_iterations: 2

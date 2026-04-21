@@ -1,0 +1,32 @@
+id: WI-007
+title: Kubernetes collector (Go, client-go)
+component: collectors.kube
+acceptance_criteria:
+  - POST /collect accepts CollectorInput, returns CollectorOutput
+  - /healthz returns 200
+  - Reads kubeconfig from $KUBECONFIG or in-cluster service account (auto-detect)
+  - Questions like "pod status", "recent events", "container state changes" resolved against client-go
+  - Respects scope_services (translates to label selectors), time_range (filters events by firstTimestamp)
+  - Writes raw k8s API responses to evidence store
+  - Finding.summary describes the pod state (e.g. "pod leaky-service-xyz in CrashLoopBackOff since 14:01; 4 OOMKilled events in last 10m")
+  - Unit tests use client-go fake client
+  - Integration test against local k3d cluster (skippable) passes
+  - Read-only — no mutating verbs in the code path
+interface_contracts:
+  - collectors/internal/contract/contract.go
+  - collectors/internal/evidence/client.go
+relevant_adrs:
+  - ADR-0001
+  - ADR-0003
+  - ADR-0006
+allowed_paths:
+  - collectors/cmd/kube-collector/**
+blocked_paths:
+  - collectors/cmd/prom-collector/**
+  - collectors/cmd/loki-collector/**
+  - collectors/internal/**
+  - agent/**
+depends_on:
+  - WI-004
+estimated_complexity: medium
+max_iterations: 3

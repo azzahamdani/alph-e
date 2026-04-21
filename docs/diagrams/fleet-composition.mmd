@@ -1,0 +1,71 @@
+flowchart TB
+  subgraph HUMAN["Human"]
+    product["Product owner<br/>(approves ADRs, reviews PRs)"]
+  end
+
+  subgraph ORCH["Orchestration layer"]
+    techlead["Tech Lead agent<br/>(stateful, owns BuildState)"]
+    reviewer["Reviewer agent<br/>(PR review, test gating)"]
+  end
+
+  subgraph SPECIALISTS["Specialists (ephemeral, one task each)"]
+    schema["Schema agent<br/>Pydantic models, enums"]
+    infra["Infra agent<br/>Docker, Ollama, Postgres, MinIO"]
+    evidence["Evidence store agent<br/>blob + metadata, TTL"]
+    collector_loki["Loki collector agent"]
+    collector_tempo["Tempo collector agent"]
+    collector_prom["Prometheus collector agent"]
+    collector_k8s["Kubernetes collector agent"]
+    collector_gh["GitHub collector agent"]
+    intake["Intake agent builder"]
+    investigator["Investigator agent builder"]
+    planner["Planner agent builder"]
+    dev["Dev agent builder"]
+    verifier["Verifier agent builder"]
+    coordinator["Coordinator agent builder"]
+    slack["Slack integration agent"]
+    linear["Linear integration agent"]
+    ghint["GitHub integration agent"]
+    eval["Eval harness agent<br/>seed incidents, golden paths"]
+    docs["Docs agent<br/>README, ADRs, runbooks"]
+  end
+
+  subgraph SUBSTRATE["Shared substrate"]
+    repo["Git repo<br/>(branch per specialist)"]
+    adr["Decision record<br/>(ADRs, architectural notes)"]
+    backlog["Task backlog<br/>(typed work items)"]
+    corpus["Test corpus<br/>(canned incidents)"]
+    ci["CI pipeline<br/>(lint, type, test, integration)"]
+  end
+
+  product -->|goals, constraints| techlead
+  techlead <--> backlog
+  techlead <--> adr
+  techlead -->|dispatch WorkItem| schema
+  techlead -->|dispatch WorkItem| infra
+  techlead -->|dispatch WorkItem| evidence
+  techlead -->|dispatch WorkItem| collector_loki
+  techlead -->|dispatch WorkItem| collector_tempo
+  techlead -->|dispatch WorkItem| collector_prom
+  techlead -->|dispatch WorkItem| collector_k8s
+  techlead -->|dispatch WorkItem| collector_gh
+  techlead -->|dispatch WorkItem| intake
+  techlead -->|dispatch WorkItem| investigator
+  techlead -->|dispatch WorkItem| planner
+  techlead -->|dispatch WorkItem| dev
+  techlead -->|dispatch WorkItem| verifier
+  techlead -->|dispatch WorkItem| coordinator
+  techlead -->|dispatch WorkItem| slack
+  techlead -->|dispatch WorkItem| linear
+  techlead -->|dispatch WorkItem| ghint
+  techlead -->|dispatch WorkItem| eval
+  techlead -->|dispatch WorkItem| docs
+
+  SPECIALISTS -->|PR| repo
+  repo --> ci
+  ci --> reviewer
+  reviewer -->|approved| repo
+  reviewer -.->|changes requested| SPECIALISTS
+  reviewer -->|needs ADR| techlead
+  techlead -->|escalate| product
+  corpus --> ci

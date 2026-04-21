@@ -28,7 +28,7 @@ The symmetry is deliberate. If the patterns that work for incident response (bou
 
 ## Tech Lead responsibilities
 
-The Tech Lead is the only stateful node. Its context holds `BuildState`, not raw specialist transcripts. It accumulates refined outputs from prior work items, then sends only the task-local slice needed for the next specialist call. Its job is decomposition and routing:
+The Tech Lead is the only stateful node. Its context holds `BuildState`, not raw specialist transcripts. It accumulates refined outputs from prior work items, then sends only the task-local slice needed for the next specialist call. `BuildState` is checkpointed externally after each routing decision so the orchestrator can resume after interruption from backlog, ADR, PR, and CI metadata plus its last persisted state. Checkpoint cadence mirrors the runtime architecture — one per routing decision here, one per orchestrator step there — in both cases matching the smallest resumable unit. Its job is decomposition and routing:
 
 1. Receive high-level goal from product owner ("implement runtime per architecture doc").
 2. Decompose into typed `WorkItem`s, seed the backlog.
@@ -62,6 +62,8 @@ class WorkItem:
 ```
 
 The specialist's input is *this item plus the files under `allowed_paths`*. It never sees the full backlog, never sees other specialists' raw working history, never sees ADRs it doesn't need. This is the same discipline we imposed on runtime collectors.
+
+**Dispatch idempotency.** After a Tech Lead restart, reconciliation may re-dispatch a `WorkItem` whose earlier dispatch completed work the checkpoint hadn't captured. Specialists must treat `WorkItem.id` as an idempotency key: if a branch `specialist/<component>/<id>` already exists, the specialist reconciles with it (either resumes the existing PR or no-ops if already merged) rather than opening a duplicate. Same pattern as the Coordinator's `ActionIntent.hash` idempotency at runtime.
 
 On completion, the specialist returns refined outputs for the Tech Lead to fold into `BuildState`: completed work, decisions made, interfaces satisfied, blockers discovered, and artifact references such as commit SHAs, PR URLs, and CI results.
 
@@ -144,6 +146,8 @@ Output is one of three decisions:
 
 That third path matters. Without it, specialists and reviewers can enter a loop trying to satisfy an unsatisfiable acceptance criterion because the underlying design is wrong.
 
+Reviewer approval is local, not sufficient for merge. Final merge is gated by CI, contract tests for touched interfaces, and merge-queue revalidation against the current base branch.
+
 ---
 
 ## Shared substrate
@@ -153,11 +157,13 @@ That third path matters. Without it, specialists and reviewers can enter a loop 
 | Git repo | GitHub | Specialists (via PR) | Everyone |
 | ADRs | `docs/adr/NNNN-*.md` | Tech Lead, escalated by reviewers | Specialists, reviewer |
 | Backlog | `backlog/*.yaml` or Linear | Tech Lead | Tech Lead (private) |
-| `BuildState` | Tech Lead's memory | Tech Lead | Tech Lead |
+| `BuildState` | External checkpoint + Tech Lead working memory | Tech Lead | Tech Lead |
 | Test corpus | `tests/fixtures/incidents/` | Eval agent | Reviewer, specialists |
 | CI pipeline | GitHub Actions | Infra agent | Reviewer |
 
 ADRs are load-bearing. They're the equivalent of the architecture doc's typed state: a record of decisions that specialists consume as context. Numbering matters (`0001-use-pydanticai.md`, `0002-evidence-store-is-s3-compatible.md`) because specialists reference them by ID.
+
+Parallelism needs one more constraint beyond path scoping: interface ownership. Shared contracts, generated code, and config roots should have a single owning workstream or a required merge-queue contract test before downstream PRs can land.
 
 ---
 
@@ -194,18 +200,17 @@ Three implementation options, in order of simplicity:
 
 Recommended: option 1 for the first pass, option 3 if the fleet grows past ~15 concurrent specialists or you want cross-run persistence.
 
+Whichever option you choose, the orchestrator needs resumability as a first-class feature: rebuild `BuildState` from persisted checkpoints, backlog state, ADR history, open PRs, and CI results rather than relying on a single long-lived interactive session.
+
 ---
 
-## Running it with a local model
+## Model selection (MVP1)
 
-For the runtime we picked GPT-OSS 20B on 16GB. For the build fleet, **use Claude (Sonnet or Opus) for Tech Lead and Reviewer, and keep specialists on the capable tier too**. Reason: the runtime forgives a weaker model because the architecture bounds context and typed contracts catch errors. Build-time mistakes compound — a specialist that silently reshapes an interface breaks downstream specialists hours later. Spend the tokens on reliability during construction; you can always swap models at runtime.
+**Claude Sonnet for every role in the fleet** — Tech Lead, Reviewer, and all specialists. Same reasoning as the runtime: one model keeps the PoC measurable, prompt caching hits the stable system/tool prefix across every call, and Sonnet is cheap enough that fleet-wide usage is bounded.
 
-If budget is the constraint, the split that works is:
+Why not tier down on mechanical specialists (infra boilerplate, docs)? Build-time mistakes compound — a specialist that silently reshapes an interface breaks downstream specialists hours later. The MVP1 call is to spend the extra Sonnet tokens on reliability during construction and revisit tiering only after there's a baseline to compare against.
 
-- Tech Lead: Claude Sonnet (decomposition and routing — not token-heavy)
-- Reviewer: Claude Sonnet (needs to reliably catch regressions)
-- Specialists: Claude Sonnet for agent-builder and schema tasks; Haiku or GPT-OSS 20B for mechanical work (infra boilerplate, docs)
-- Never: local models for anything touching the schema or interface contracts
+Post-MVP tiering candidates, once validated: Haiku for docs/boilerplate specialists, Opus for hard agent-builder and schema work. Never local models for anything touching schema or interface contracts.
 
 ---
 
@@ -219,6 +224,8 @@ Same discipline as the runtime doc — the happy path is easy, the edges are whe
 - **Tech Lead starts editing code.** Detect by monitoring its tool calls — if it reaches for file-write tools outside `docs/adr/`, something has gone wrong in the prompt.
 - **ADR drift.** Specialists should reject WorkItems whose `relevant_adrs` contradict the current code. Tech Lead should periodically re-validate ADRs against the codebase.
 - **Parallel specialists conflict.** Path scoping prevents most cases, but shared files (pyproject.toml, docker-compose.yml) are conflict magnets. Either serialise work items touching those files, or give a single "config maintainer" specialist exclusive write access.
+- **Parallel PRs drift semantically while staying path-clean.** Merge queue plus contract tests on shared interfaces must catch this before merge.
+- **Tech Lead restart loses orchestration progress.** Recovery should reconcile persisted `BuildState` with backlog, ADRs, open PRs, and CI before dispatch resumes.
 
 ---
 

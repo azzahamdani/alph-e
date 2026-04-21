@@ -37,7 +37,7 @@ Designed around two load-bearing constraints:
 | **Validator** | no | Given a candidate hypothesis and evidence refs, confirm or falsify. Runs counter-example searches. |
 | **Remediation planner** | no | Decide the remediation *type* before any fix is attempted. Output a typed `RemediationPlan`. |
 | **Dev agent** | no | Given a plan of type `pr`, produce a `FixProposal` (branch, diff, commit message, PR body). |
-| **Fix verifier** | no | Run `terraform plan` / `helm template` / `kubectl diff` / tests. Loop back to Dev on failure. |
+| **Fix verifier** | no | Run `terraform plan` / `helm template` / `kubectl diff` / tests. Classify failures as implementation defects vs diagnosis-invalidating signals. |
 | **Coordinator** | no | Post-decision lifecycle: PR creation, reviewer feedback routing, ops execution, Linear updates, escalation. |
 
 The split between Investigator and Coordinator matters: the Investigator's prompt is about *reasoning under uncertainty*; the Coordinator's is about *running a process*. Keeping them separate is what lets each stay narrow and evaluable.
@@ -54,6 +54,7 @@ Four layers, each with a different lifetime and retrieval pattern:
 
 - Working state is the only memory always in context.
 - Working state is composed of refined state: hypotheses, findings, decisions, and evidence references derived from prior subagent runs.
+- Working state is checkpointed outside the live model context after every state transition so the orchestrator can resume after crashes, deploys, or long pauses.
 - Semantic memory is retrieved per step against the current hypothesis, not pre-loaded.
 - Episodic memory is queried once at intake: "have we seen this before?"
 - Entity memory is cached per service; cheap to maintain, expensive to recompute per turn.
@@ -69,6 +70,10 @@ Four layers, each with a different lifetime and retrieval pattern:
 
 - `IncidentState` is the only durable container. Collectors receive a `CollectorInput` slice, not the whole state.
 - `IncidentState` stores refined outputs from prior steps, not raw observability payloads or full collector transcripts.
+- `IncidentState` is persisted as an external checkpoint after each orchestrator step; rehydration rebuilds the live prompt from state plus referenced evidence.
+- Checkpoint ordering: evidence-store writes commit *before* the state checkpoint that references them, so rehydration never points at missing blobs. A subagent call in flight at crash time is re-dispatched on restart — idempotency on `(incident_id, collector_name, question, time_range, scope, environment_fingerprint)` makes the retry safe.
+- Checkpoint cadence matches the smallest resumable unit — one per orchestrator step in the runtime, one per routing decision in the build fleet. Anything finer-grained wastes I/O; anything coarser loses work on restart.
+- `ActionIntent` is the audit unit for mutations: hash, signer, approval record, and execution outcome are part of `IncidentState.actions_taken` alongside the `Action` entry that realised it.
 - `EvidenceRef` is a pointer, not content. Raw data lives at `storage_uri`; `expires_at` forces an explicit retention decision.
 - `RemediationPlan.type = none` is a valid output — "investigated, nothing to automate, handing off."
 - `investigation_attempts` is the single attempt counter, deliberately not duplicated across `FixProposal` or `CollectorInput`.
@@ -83,10 +88,18 @@ Collectors are pure-ish functions. Each call is a fresh context. The contract is
 ```python
 # Input
 CollectorInput(
+    incident_id="inc_2a91",
     question="Is db-primary showing connection errors in the last 15m?",
     hypothesis_id="hyp_3",
     time_range=TimeRange("14:00", "14:15"),
     scope_services=["db-primary"],
+    environment_fingerprint=EnvironmentFingerprint(
+        cluster="prod-eu-west-1",
+        account="123456789012",
+        region="eu-west-1",
+        deploy_revision="api@v2.14.3",
+        rollout_generation="api-7f9a",
+    ),
     max_internal_iterations=5,
 )
 
@@ -116,7 +129,7 @@ CollectorOutput(
 
 **Why `max_internal_iterations`:** collectors are allowed to iterate (run 2–3 refined queries before returning) because good log triage genuinely needs it. But the cap is explicit — without it, a collector can quietly blow up its own context window chasing a dead hypothesis. Five is usually enough; hard stop.
 
-**Caching:** collector calls are memoised on `(collector_name, question, time_range, scope)`. Five-minute TTL. During an incident the orchestrator often re-frames the same window; no reason to re-hit Loki.
+**Caching:** collector calls are memoised on `(incident_id, collector_name, question, time_range, scope, environment_fingerprint)`. Five-minute TTL. `environment_fingerprint` should capture the cluster / account / region plus freshness signals like deploy revision or rollout generation so cached findings are invalidated when the system materially changes.
 
 ---
 
@@ -132,6 +145,20 @@ The pre-flight gate that prevents the system from forcing PRs when the right act
 - Operational actions (`rollback`, `scale`, `flag_flip`, `runbook`) go to the Coordinator and execute against cloud/k8s APIs with full audit logging in `IncidentState.actions_taken`.
 - `requires_human_approval=True` on the plan forces a Slack confirmation before the Coordinator acts — default `True` for anything that mutates production.
 - `type = none` is a clean escalation path when the agent has investigated but has no actionable remediation.
+
+**Safety contract for operational actions:**
+
+- Every mutable action is materialised as a signed `ActionIntent` with a stable hash over target, parameters, expected effect, rollback hint, and expiry.
+- The **Planner** signs the intent; the **Coordinator** verifies the signature before executing. Keys are held by distinct identities so a compromised Coordinator cannot forge intents.
+- Human approval binds to that exact `ActionIntent` hash; if the plan changes, approval is invalidated (`approval_status = invalidated`) and must be re-issued.
+- Default approval validity: 15 minutes from grant, or until the next precondition check fails — whichever is sooner. `ActionIntent.expires_at` encodes the ceiling.
+- Coordinator executions use `ActionIntent.hash` as the idempotency key so retries cannot fan out duplicate mutations.
+- Mutations run under a dedicated least-privilege service identity, never a human engineer's ambient credentials.
+- Immediately before execution the Coordinator re-checks preconditions against live state. Stale plans are rejected and routed by *what changed*:
+  - **Diagnosis-invalidating change** (the root-cause observation no longer holds) → Investigator.
+  - **Parameter-only change** (target pod renamed, replica count already adjusted) → Planner for a fresh `ActionIntent`.
+  - **Already-resolved** (the bad deploy was rolled back by a human, the flag is already flipped) → Coordinator short-circuits to `resolved` with a `no_op` action record; no round-trip.
+- Partial success triggers compensation: the Coordinator executes the inverse derived from `ActionIntent.rollback_hint`, records both the forward and compensating actions in `IncidentState.actions_taken`, and escalates. No unbounded self-healing loops.
 
 ---
 
@@ -166,7 +193,7 @@ Investigation phases that generate a lot of tokens internally but only need to r
 | Parallel collector dispatch when hypotheses are independent | Latency win; no token penalty |
 | Server-side aggregation (LogQL counts, PromQL rates) instead of raw data | Push computation to data plane, not the LLM |
 | Sliding window + rolling summary on long incidents | Past turns compressed into "what we've learned so far" paragraph |
-| Collector output cache, 5-min TTL, keyed on `(query, time_range)` | Free for re-framings within the same incident |
+| Collector output cache, 5-min TTL, keyed on incident + scope + environment fingerprint | Free for re-framings within the same incident without serving stale cross-environment results |
 
 ---
 
@@ -178,7 +205,8 @@ A few non-obvious edges worth calling out because they're the ones that typicall
 |---|---|---|---|
 | Reviewer | changes on the **fix** | Dev agent | Don't re-investigate for a typo fix |
 | Reviewer | challenges the **root cause** | Investigator | Full rethink warranted |
-| Verifier | dry-run fails | Dev agent | Not the Investigator — the diagnosis is still valid |
+| Verifier | implementation defect (`VerifierResult.kind = implementation_error`) | Dev agent | Diagnosis still stands; patch the fix |
+| Verifier | diagnosis invalidated (`VerifierResult.kind = diagnosis_invalidated`) | Investigator | Dry-run evidence contradicted the current root-cause theory |
 | Planner | `type = none` | Coordinator → escalation | Not a failure; a legitimate outcome |
 | Investigator | attempts exhausted | Coordinator (not directly to Slack) | Coordinator owns lifecycle; escalation is a lifecycle event |
 | On-call | follow-up question | Investigator | Agent stays available during handoff |
@@ -192,9 +220,13 @@ The happy path is easy. These are the paths that determine whether the system ac
 - **Collector returns empty / no signal.** Does the Investigator correctly update hypothesis status, or does it loop?
 - **Hypotheses all score below threshold.** Does the system correctly hand off as `type = none` rather than forcing a weak PR?
 - **Verifier fails repeatedly on the same proposal.** Cap Dev → Verifier iterations at 3; escalate beyond.
+- **Verifier invalidates the diagnosis.** The verifier must be able to reopen investigation, not just request implementation tweaks.
 - **Reviewer requests changes ambiguously.** Default to "changes on fix" route; only re-open investigation on explicit challenge to root cause.
 - **Orchestrator asks bad collector questions.** "Show me logs from db-primary" is a UI query, not a hypothesis test. Invest in an eval set of past incidents to check question quality.
 - **Evidence store GC-ing mid-incident.** Lifecycle rules must be longer than expected incident duration + postmortem window.
+- **Approved action executes against changed reality.** Re-check preconditions immediately before mutation; default approval validity 15 min or until a precondition re-check fails.
+- **Already-resolved race.** Fresh precondition check reveals the bad deploy was already rolled back by a human — Coordinator must short-circuit to `resolved` rather than round-trip through Investigator/Planner.
+- **Crashed with subagent in flight.** State checkpoint must commit *after* evidence writes, and subagent dispatch must be keyed on `(incident_id, collector_name, question, time_range, scope, environment_fingerprint)` so restart re-dispatch is idempotent.
 
 ---
 
@@ -205,7 +237,7 @@ Things the architecture deliberately leaves to you:
 1. **Collector iteration model.** Single-shot per call, or iterative with a cap? Recommend iterative with `max_internal_iterations=5`. More powerful for log triage; still bounded.
 2. **Human-in-the-loop mode for escalation.** Does the agent stay active as a tool, or is escalation a full handoff? Recommend the former — keeps institutional memory.
 3. **Auto-execute vs. auto-propose for operational actions.** `rollback` and `scale` can be safe to auto-execute; `flag_flip` often needs approval. Default `requires_human_approval=True`; relax per action type with deliberation.
-4. **Which model tier per role.** Haiku for Intake and Coordinator routing; Sonnet for Investigator and most collectors; Opus only for hard hypothesis synthesis. Measure before locking in.
+4. **Which model tier per role.** MVP1 uses Claude Sonnet everywhere to keep the PoC simple and measurable. Post-MVP: Haiku for Intake and Coordinator routing, Sonnet for Investigator and most collectors, Opus only for hard hypothesis synthesis. Tiering only after there's a baseline to compare against.
 5. **Episodic memory bootstrap.** Does the system start cold, or seed from existing postmortems? Seeding is worth the one-time ETL cost — past incidents are where the agent gets smarter.
 
 ---
@@ -215,7 +247,7 @@ Things the architecture deliberately leaves to you:
 | Layer | Choice | Notes |
 |---|---|---|
 | Agent framework | PydanticAI or LangGraph | Both have first-class typed state; LangGraph is better at explicit graph control flow |
-| LLM | Anthropic (Claude Sonnet + Haiku mix) | Prompt caching is the killer cost lever |
+| LLM | Anthropic Claude Sonnet (single tier for MVP1) | Single model across all roles until there's a baseline to tier against; prompt caching is the killer cost lever regardless |
 | Semantic + episodic memory | Postgres + pgvector | Simple, adequate; don't over-engineer |
 | Evidence store | S3 / MinIO (blobs) + Postgres (metadata) | 30-day lifecycle rules |
 | Cloud / k8s tools | MCP servers per provider | Composable, swappable, auditable |
@@ -226,48 +258,35 @@ Things the architecture deliberately leaves to you:
 
 ---
 
-## Local demo deployment
+## MVP1: PoC deployment
 
-For a self-contained demo that runs on a 16GB box (16GB VRAM or 16GB unified memory on Apple Silicon). Not production; enough to exercise the full graph end-to-end against canned incidents.
+MVP1 is a proof-of-concept on a small demo cluster. The goal is to exercise the full graph end-to-end against canned incidents and validate the architecture's load-bearing claims (bounded context, typed contracts, evidence-by-reference, pre-flight gates). It is not production and is not tuned for cost or latency.
 
-### Model choice
+### Model selection
 
-**Primary: GPT-OSS 20B.** Uses ~13.7GB VRAM, generates at ~42 tokens/second, strong tool calling and structured output. The two capabilities that matter for this architecture — reliable function calling and clean JSON adherence to typed contracts — are exactly where GPT-OSS 20B is strongest in its weight class.
+**Claude Sonnet for every role.** One model across Intake, Investigator, collectors, Planner, Dev, Verifier, and Coordinator. Rationale:
 
-Fallbacks, in order of preference:
+- Sonnet is cheap enough per token that the PoC's end-to-end spend is bounded, and smart enough that no role is the weak link.
+- Avoids the multi-model variance problem — if a PoC misfires, we know it's the prompt or the graph, not a model mismatch.
+- Prompt caching applies to the stable system/tool prefixes across all roles, which is the real cost lever.
+- Tiering to Haiku on routing roles (Intake, Coordinator) and Opus on synthesis (hard hypothesis work) is a post-MVP optimisation — requires an MVP1 baseline to measure against.
 
-| Model | Footprint | Why you'd pick it |
-|---|---|---|
-| Qwen 3 14B (Reasoning) | ~9GB at Q4 | More context headroom; stronger reasoning chains; slightly weaker tool calling |
-| Qwen 2.5 Coder 14B | ~9GB at Q4 | If the demo emphasises the Dev agent's PR authoring path |
-| Mistral Nemo 12B | ~7GB at Q4 | Reliable middle ground; boring but works |
-| Llama 3.1 8B Instruct | ~5GB at Q4 | Tiny, fast; weaker reasoning but responsive for live demos |
+No local inference in MVP1. Explicit non-goal.
 
-**Avoid for this demo:**
+### Demo cluster
 
-- Large-total MoE models (GLM-4.5-Air, Qwen3-30B-A3B) — active params are small but the full weights must load; doesn't fit at usable quantization in 16GB.
-- DeepSeek R1 distills as the orchestrator — thinking tokens inflate context fast, which is exactly the sprawl problem the architecture is designed to avoid.
+A small Kubernetes cluster (kind / k3d / minikube, or a single-node EKS/GKE dev cluster) running:
 
-### Docker compose
+- 2–3 toy services with intentionally breakable failure modes (OOM, bad deploy, dependency timeout).
+- Grafana LGTM stack or the Grafana Cloud free tier as the observability backend.
+- A seed incident generator that triggers each failure mode on demand.
+
+The agent runs alongside as a container; everything talks to the demo cluster's APIs.
+
+### Docker compose (agent side)
 
 ```yaml
 services:
-  ollama:
-    image: ollama/ollama:latest
-    container_name: ollama
-    ports:
-      - "11434:11434"
-    volumes:
-      - ollama-data:/root/.ollama
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
-    restart: unless-stopped
-
   postgres:
     image: pgvector/pgvector:pg16
     container_name: postgres
@@ -296,49 +315,40 @@ services:
     build: ./agent
     container_name: devops-agent
     environment:
-      - OPENAI_BASE_URL=http://ollama:11434/v1
-      - OPENAI_API_KEY=ollama
-      - MODEL_NAME=gpt-oss:20b
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - MODEL_NAME=claude-sonnet-4-6
       - POSTGRES_URL=postgresql://postgres:devops@postgres:5432/incidents
       - EVIDENCE_S3_ENDPOINT=http://minio:9000
       - EVIDENCE_S3_BUCKET=incidents
+      - KUBECONFIG=/root/.kube/config
+    volumes:
+      - ~/.kube:/root/.kube:ro
     depends_on:
-      - ollama
       - postgres
       - minio
 
 volumes:
-  ollama-data:
   postgres-data:
   minio-data:
 ```
 
-First-run:
+### What MVP1 deliberately does *not* cover
 
-```bash
-docker compose up -d
-docker exec ollama ollama pull gpt-oss:20b
-```
+- **No local inference.** Addressed post-MVP if token spend on real incident volume justifies the ops burden.
+- **No model tiering.** Sonnet-everywhere until there's data showing where tiering pays off.
+- **No production mutations.** `requires_human_approval=True` on every `ActionIntent`; the Coordinator's cloud-mutation paths are stubbed to `dry_run` against the demo cluster.
+- **Single-cluster, single-environment.** `environment_fingerprint` still encodes cluster/region/revision, but there's only one environment, so cross-environment cache poisoning can't be exercised until MVP2.
+- **Episodic memory cold-start.** No postmortem ETL in MVP1 — the system learns from the canned incident set only.
 
-On Apple Silicon, remove the `deploy.resources` block — Docker on Mac can't passthrough the Neural Engine. Better to run Ollama natively on the host and point the containerised agent at `http://host.docker.internal:11434`; that uses unified memory properly and is materially faster than CPU-bound Docker.
+### Post-MVP: mixed deployment
 
-### Mixed deployment (recommended for anything beyond demo)
-
-Local models handle tool-calling mechanics convincingly but show their seams on hypothesis synthesis under ambiguity and nuanced PR authoring. The practical pattern for production is **local collectors, cloud orchestrator**:
+Once the PoC validates the graph, the practical production pattern is **local collectors, cloud orchestrator**:
 
 ![mixed-deployment](diagrams/mixed-deployment.svg)
 
-**Rationale:** collectors are high-volume and mechanical — they benefit from being local (no per-call cost, low latency, data never leaves the VPC). The orchestrator and dev agent are low-volume but high-stakes — they benefit from frontier-model reasoning. This split typically cuts cloud spend by 70%+ versus all-cloud while keeping the hard-reasoning quality where it matters.
+Collectors are high-volume and mechanical — they benefit from being local (no per-call cost, low latency, data never leaves the VPC). The orchestrator and Dev agent are low-volume but high-stakes — they benefit from frontier-model reasoning. Typically cuts cloud spend 70%+ versus all-cloud while keeping hard-reasoning quality where it matters. Config surface lives on `IncidentState.phase` so model binding is declarative, not hardcoded into prompts.
 
-Config surface for this pattern lives on `IncidentState.phase` — each phase has its own model binding, so routing is declarative rather than hardcoded into prompts.
-
-### Demo caveats worth framing upfront
-
-So the audience doesn't judge the architecture by the local model's ceiling:
-
-- Local 20B handles the *mechanics* (tool calls fire, state updates happen, PRs draft) but not the *synthesis* (nuanced root-cause narratives, cross-service correlation under ambiguity).
-- Prompt caching — the single biggest cost lever for cloud deployment — doesn't apply to local inference, so observed token economics don't extrapolate.
-- Response times on 16GB will feel slower than production would. 42 t/s is fine for a chat demo; it's noticeable across a 20-step investigation loop.
+Not in scope for MVP1.
 
 ---
 

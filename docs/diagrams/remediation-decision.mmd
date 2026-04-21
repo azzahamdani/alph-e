@@ -1,0 +1,8 @@
+flowchart LR
+  investigator["Investigator:<br/>root cause + confidence"] --> planner["Remediation planner"]
+  planner -->|type = pr| dev["Dev agent -> PR"]
+  planner -->|type = rollback| roll["Coordinator -> kubectl / ArgoCD rollback"]
+  planner -->|type = scale| scale["Coordinator -> HPA / replica adjust"]
+  planner -->|type = flag_flip| flag["Coordinator -> LaunchDarkly / Unleash"]
+  planner -->|type = runbook| run["Coordinator -> execute runbook step"]
+  planner -->|type = none| handoff["Coordinator -> escalation"]

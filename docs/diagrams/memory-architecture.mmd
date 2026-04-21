@@ -1,0 +1,32 @@
+flowchart TB
+  subgraph WORKING["Working state (in-context)"]
+    incident["IncidentState<br/>alert, hypotheses, findings,<br/>timeline, current focus"]
+  end
+
+  subgraph SEMANTIC["Semantic memory (retrieved per step)"]
+    runbooks["Runbooks"]
+    arch["Architecture docs"]
+    catalog["Service catalog"]
+    slos["SLOs"]
+  end
+
+  subgraph EPISODIC["Episodic memory (retrieved at intake)"]
+    past["Past incidents<br/>symptoms -> root cause -> fix<br/>vector-indexed"]
+  end
+
+  subgraph ENTITY["Entity memory (cached)"]
+    services["Per-service fact sheets<br/>owners, deps, recent deploys"]
+  end
+
+  subgraph EVIDENCE["Evidence store (by ID)"]
+    blobs["Raw log / trace / metric / diff payloads<br/>S3 or Postgres, TTL-bounded"]
+  end
+
+  investigator[Investigator] --> incident
+  investigator -.-> SEMANTIC
+  investigator -.-> EPISODIC
+  investigator -.-> ENTITY
+  collector[Collector] -.->|writes| blobs
+  collector -->|references| incident
+  verifier[Verifier] -.->|reads| blobs
+  dev[Dev agent] -.->|reads| blobs

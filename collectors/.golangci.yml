@@ -1,0 +1,49 @@
+run:
+  timeout: 3m
+  tests: true
+
+linters:
+  disable-all: true
+  enable:
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - gofmt
+    - goimports
+    - revive
+    - gocritic
+    - gosec
+    - misspell
+    - unconvert
+    - unparam
+    - bodyclose
+    - contextcheck
+    - nilerr
+    - noctx
+    - errorlint
+
+linters-settings:
+  revive:
+    severity: warning
+    rules:
+      - name: exported
+      - name: var-naming
+      - name: context-as-argument
+      - name: unused-parameter
+        disabled: true
+  gocritic:
+    enabled-tags:
+      - diagnostic
+      - performance
+      - style
+  goimports:
+    local-prefixes: github.com/Matt-LiFi/alph-e/collectors
+
+issues:
+  exclude-rules:
+    - path: _test\.go
+      linters:
+        - gosec
+        - errcheck

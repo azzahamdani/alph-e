@@ -1,0 +1,48 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: demo-alerts
+  namespace: monitoring
+  labels:
+    # Picked up by the kube-prometheus-stack Prometheus via ruleSelectorNilUsesHelmValues=false
+    release: kps
+spec:
+  groups:
+    - name: demo.rules
+      interval: 30s
+      rules:
+        # App-level signal: leaky-service's own gauge climbs monotonically.
+        # Fires ~30s after the leak begins; well before the OOM.
+        - alert: PodMemoryRisingFast
+          expr: rate(demo_leaked_bytes[2m]) > 1048576
+          for: 1m
+          labels:
+            severity: warning
+            namespace: demo
+          annotations:
+            summary: "Pod {{ $labels.pod }} leaking memory fast"
+            description: |
+              demo_leaked_bytes is growing at > 1 MiB/s averaged over 2m on
+              pod {{ $labels.pod }}. This is the leaky-service canned incident;
+              the agent should pick this up and correlate with OOMKilled events.
+
+        # Kube-state-metrics signal: the OOM actually happened.
+        # This is the Alertmanager → Intake entry point the agent is wired against.
+        - alert: PodOOMKilled
+          expr: |
+            max_over_time(
+              kube_pod_container_status_last_terminated_reason{
+                reason="OOMKilled", namespace="demo"
+              }[5m]
+            ) > 0
+          for: 0m
+          labels:
+            severity: critical
+            namespace: demo
+          annotations:
+            summary: "Pod {{ $labels.pod }} OOMKilled"
+            description: |
+              Container {{ $labels.container }} in pod {{ $labels.pod }}
+              (namespace {{ $labels.namespace }}) was OOMKilled in the last 5m.
+              The agent's Intake webhook should receive this alert and seed a
+              new IncidentState.

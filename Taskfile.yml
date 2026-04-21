@@ -192,3 +192,109 @@ tasks:
         echo ""
         echo "  Watch the OOM loop:   task demo:watch"
         echo ""
+
+  # ── Monitoring: alert rules (host-side agent) ────────────────────────
+
+  monitoring:alerts:
+    desc: Apply the PrometheusRule CR that fires the agent's canned incidents
+    cmds:
+      - kubectl apply -n {{.MONITORING_NS}} -f monitoring/alert-rules.yaml
+
+  # ── Agent (Python orchestrator) ──────────────────────────────────────
+
+  agent:install:
+    desc: Resolve Python deps via uv (creates agent/.venv)
+    dir: agent
+    cmds:
+      - uv sync --all-extras
+
+  agent:lint:
+    desc: ruff + mypy --strict on the agent package
+    dir: agent
+    cmds:
+      - uv run ruff check src tests
+      - uv run ruff format --check src tests
+      - uv run mypy --strict src
+
+  agent:test:
+    desc: Run the agent unit test suite
+    dir: agent
+    cmds:
+      - uv run pytest -q
+
+  agent:serve:
+    desc: Start the Intake FastAPI on :8000
+    dir: agent
+    cmds:
+      - uv run python -m agent serve --reload
+
+  agent:fire:
+    desc: Fire the OOM fixture at the in-process Intake app
+    dir: agent
+    cmds:
+      - uv run python -m agent fire tests/fixtures/incidents/oom-leaky-service.json
+
+  # ── Collectors (Go) ──────────────────────────────────────────────────
+
+  collectors:lint:
+    desc: golangci-lint across the collectors module
+    dir: collectors
+    cmds:
+      - golangci-lint run ./...
+
+  collectors:test:
+    desc: go test with -race
+    dir: collectors
+    cmds:
+      - go test ./... -race -count=1
+
+  collectors:build:
+    desc: Build the three collector binaries into collectors/bin
+    dir: collectors
+    cmds:
+      - make build
+
+  collectors:run:
+    desc: Run all three collectors on :8001 / :8002 / :8003
+    dir: collectors
+    cmds:
+      - make run
+
+  # ── Agent-side infra (Postgres + MinIO) ──────────────────────────────
+
+  infra:up:
+    desc: Start Postgres + MinIO via docker compose
+    dir: infra
+    cmds:
+      - docker compose up -d
+
+  infra:down:
+    desc: Stop the host-side infra stack
+    dir: infra
+    cmds:
+      - docker compose down
+
+  infra:logs:
+    desc: Follow infra container logs
+    dir: infra
+    cmds:
+      - docker compose logs -f
+
+  infra:psql:
+    desc: Open a psql shell against the local postgres container
+    dir: infra
+    cmds:
+      - docker compose exec postgres psql -U postgres -d incidents
+
+  # ── Dev aggregate ────────────────────────────────────────────────────
+
+  dev:
+    desc: Bring up infra + collectors + agent for local development
+    deps: [infra:up]
+    cmds:
+      - |
+        echo ""
+        echo "  infra is up. In separate terminals run:"
+        echo "    task collectors:run    # ports 8001/8002/8003"
+        echo "    task agent:serve       # port 8000 (Alertmanager target)"
+        echo ""

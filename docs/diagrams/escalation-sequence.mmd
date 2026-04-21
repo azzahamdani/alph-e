@@ -1,0 +1,16 @@
+sequenceDiagram
+    participant I as Investigator
+    participant C as Coordinator
+    participant S as Slack #devops
+    participant O as On-call
+    participant L as Linear
+
+    I->>I: attempt N failed or confidence below threshold
+    I->>C: EscalationPackage
+    C->>L: update ticket status = escalated
+    C->>S: post structured summary + evidence links
+    S->>O: notification
+    O->>I: ask follow-up question (agent as tool)
+    I->>O: answer from IncidentState + evidence store
+    Note over O,I: agent retains context; human leads
+    O->>L: resolve or continue manually

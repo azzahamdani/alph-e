@@ -1,0 +1,30 @@
+id: WI-006
+title: Loki collector (Go)
+component: collectors.loki
+acceptance_criteria:
+  - POST /collect accepts CollectorInput, returns CollectorOutput
+  - /healthz returns 200
+  - Issues LogQL queries against $LOKI_URL (query_range by default)
+  - Server-side aggregation for count/rate queries (never returns raw log lines unless explicitly asked)
+  - Respects time_range, scope_services (translated to {namespace=, pod=} matchers), max_internal_iterations
+  - Writes raw responses to evidence store
+  - Finding.summary summarises log patterns (e.g. "847 'connection refused' errors, first at 14:02:17, 3 distinct services")
+  - Unit + integration tests pass
+interface_contracts:
+  - collectors/internal/contract/contract.go
+  - collectors/internal/evidence/client.go
+relevant_adrs:
+  - ADR-0001
+  - ADR-0003
+  - ADR-0006
+allowed_paths:
+  - collectors/cmd/loki-collector/**
+blocked_paths:
+  - collectors/cmd/prom-collector/**
+  - collectors/cmd/kube-collector/**
+  - collectors/internal/**
+  - agent/**
+depends_on:
+  - WI-004
+estimated_complexity: medium
+max_iterations: 3

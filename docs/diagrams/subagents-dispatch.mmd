@@ -1,0 +1,15 @@
+flowchart TB
+  orch["Orchestrator<br/>(lead investigator)"]
+  orch -->|dispatch| loki["Loki collector"]
+  orch -->|dispatch| tempo["Tempo collector"]
+  orch -->|dispatch| prom["Prometheus collector"]
+  orch -->|dispatch| kube["Kubernetes collector"]
+  orch -->|dispatch| gh["GitHub collector<br/>(recent deploys/PRs)"]
+  orch -->|dispatch| hist["Historical incidents<br/>(episodic memory)"]
+
+  loki -->|Finding| orch
+  tempo -->|Finding| orch
+  prom -->|Finding| orch
+  kube -->|Finding| orch
+  gh -->|Finding| orch
+  hist -->|Finding| orch

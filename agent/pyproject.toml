@@ -1,0 +1,103 @@
+[project]
+name = "devops-agent"
+version = "0.0.1"
+description = "DevOps investigation agent — orchestrator, agents, schemas, evidence store."
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+
+dependencies = [
+    "anthropic>=0.40.0",
+    "langgraph>=0.2.50",
+    "langgraph-checkpoint-postgres>=2.0.1",
+    "pydantic>=2.9.0",
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.32.0",
+    "boto3>=1.35.0",
+    "psycopg[binary,pool]>=3.2.0",
+    "httpx>=0.27.0",
+    "structlog>=24.4.0",
+    "pyyaml>=6.0.2",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3.0",
+    "pytest-asyncio>=0.24.0",
+    "pytest-mock>=3.14.0",
+    "ruff>=0.7.0",
+    "mypy>=1.13.0",
+    "types-boto3[s3]>=1.0.0",
+    "types-pyyaml>=6.0.0",
+    "respx>=0.21.0",
+]
+
+[project.scripts]
+agent = "agent.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/agent"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "E", "F", "W",      # pycodestyle + pyflakes
+    "I",                # isort
+    "UP",               # pyupgrade
+    "B",                # bugbear
+    "SIM",              # simplify
+    "N",                # naming
+    "C4",               # comprehensions
+    "RET",              # returns
+    "ASYNC",            # async correctness
+    "A",                # builtin shadowing
+    "ERA",              # commented-out code
+]
+ignore = [
+    "E501",  # line length is handled by formatter
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["S101"]  # asserts fine in tests
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+files = ["src"]
+plugins = ["pydantic.mypy"]
+
+[[tool.mypy.overrides]]
+module = [
+    "langgraph.*",
+    "langgraph_checkpoint_postgres.*",
+]
+ignore_missing_imports = true
+
+[tool.pydantic-mypy]
+init_forbid_extra = true
+init_typed = true
+warn_required_dynamic_aliases = true
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests"]
+addopts = [
+    "-ra",
+    "--strict-markers",
+    "--strict-config",
+]
+markers = [
+    "unit: fast, no external deps",
+    "integration: needs infra (Postgres, MinIO) running — auto-skip if not up",
+    "evidence: specifically exercises the evidence store",
+    "e2e: full stack required (cluster + monitoring + infra + agent)",
+]
+asyncio_mode = "auto"

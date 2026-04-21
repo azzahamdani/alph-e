@@ -1,0 +1,30 @@
+id: WI-005
+title: Prometheus collector (Go)
+component: collectors.prom
+acceptance_criteria:
+  - POST /collect accepts CollectorInput, returns CollectorOutput
+  - /healthz returns 200
+  - Issues instant + range queries against the local Prometheus at $PROMETHEUS_URL
+  - Respects CollectorInput.time_range and max_internal_iterations
+  - Writes raw query responses to the evidence store; Finding.evidence_id references them
+  - Finding.summary is a non-trivial one-line human summary (e.g. "3 series matched, max value 2.14GiB at 14:03:22")
+  - Unit tests with mocked Prometheus client pass
+  - Integration test against local cluster (skippable if not up) passes
+interface_contracts:
+  - collectors/internal/contract/contract.go
+  - collectors/internal/evidence/client.go
+relevant_adrs:
+  - ADR-0001
+  - ADR-0003
+  - ADR-0006
+allowed_paths:
+  - collectors/cmd/prom-collector/**
+blocked_paths:
+  - collectors/cmd/loki-collector/**
+  - collectors/cmd/kube-collector/**
+  - collectors/internal/**
+  - agent/**
+depends_on:
+  - WI-004
+estimated_complexity: medium
+max_iterations: 3

@@ -1,0 +1,28 @@
+id: WI-011
+title: Remediation planner role — typed RemediationPlan output
+component: agents.planner
+acceptance_criteria:
+  - Given IncidentState with at least one confirmed Hypothesis, produces a RemediationPlan
+  - Plan type is one of: pr, rollback, scale, flag_flip, runbook, none
+  - type=none is a first-class outcome, not a failure
+  - requires_human_approval defaults to True for mutating types (all except pr and none)
+  - Routes to Dev (type=pr), Coordinator (operational types), or escalation path (type=none)
+  - Unit tests cover each plan type with a canonical input state
+  - planner.md prompt file committed
+interface_contracts:
+  - agent/src/agent/schemas/remediation.py (RemediationPlan)
+  - agent/src/agent/schemas/incident.py
+relevant_adrs:
+  - ADR-0004
+allowed_paths:
+  - agent/src/agent/orchestrator/nodes/planner.py
+  - agent/src/agent/prompts/planner.md
+  - agent/tests/unit/test_planner_*.py
+blocked_paths:
+  - agent/src/agent/schemas/**
+  - agent/src/agent/orchestrator/nodes/!(planner).py
+  - collectors/**
+depends_on:
+  - WI-009
+estimated_complexity: medium
+max_iterations: 3

@@ -62,8 +62,37 @@ task cluster:down     # keeps the registry, fast to restart
 task cluster:nuke     # removes everything including cached images
 ```
 
+## The agent side
+
+Everything above is the **lab substrate** — the cluster the agent investigates.
+The agent itself lives in two sibling trees:
+
+- [`agent/`](agent/) — Python orchestrator (LangGraph + FastAPI + Pydantic schemas)
+- [`collectors/`](collectors/) — Go services the orchestrator dispatches against
+- [`infra/`](infra/) — host-side docker-compose for Postgres + MinIO (agent deps)
+
+Quick start (in addition to `task up`):
+
+```
+task infra:up              # Postgres + MinIO
+task agent:install         # uv sync
+task agent:test            # schemas + routing + intake
+task collectors:test       # go test ./...
+task monitoring:alerts     # apply the PrometheusRule that fires the OOM alert
+task agent:serve           # FastAPI on :8000 — Alertmanager's target
+task collectors:run        # three services on :8001 / :8002 / :8003
+```
+
+Design docs and ADRs:
+
+- Architecture: [`docs/devops-agent-architecture.md`](docs/devops-agent-architecture.md)
+- Build fleet: [`docs/devops-agent-build-fleet.md`](docs/devops-agent-build-fleet.md)
+- Decisions: [`docs/adr/`](docs/adr/) (0001–0007)
+- Build-fleet subagents: [`.claude/agents/`](.claude/agents/)
+- Work item backlog: [`backlog/`](backlog/)
+
 ## Next steps
 
-- Wire up the collector agent (outside-cluster Python process, kubeconfig + Prometheus API)
-- Add LangGraph skeleton for central → collector → QA → dev flow
+- Replace the skeleton nodes in `agent/src/agent/orchestrator/nodes/` with real reasoning (WI-010–012)
+- Replace the collector stubs in `collectors/cmd/*` with PromQL/LogQL/client-go dispatch (WI-005–007)
 - Add a second failure mode (readiness probe timeout) once the first investigation works end-to-end
