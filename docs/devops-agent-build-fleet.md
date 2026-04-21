@@ -28,7 +28,7 @@ The symmetry is deliberate. If the patterns that work for incident response (bou
 
 ## Tech Lead responsibilities
 
-The Tech Lead is the only stateful node. Its context holds `BuildState`, not individual specialist outputs. Its job is decomposition and routing:
+The Tech Lead is the only stateful node. Its context holds `BuildState`, not raw specialist transcripts. It accumulates refined outputs from prior work items, then sends only the task-local slice needed for the next specialist call. Its job is decomposition and routing:
 
 1. Receive high-level goal from product owner ("implement runtime per architecture doc").
 2. Decompose into typed `WorkItem`s, seed the backlog.
@@ -61,7 +61,9 @@ class WorkItem:
     max_iterations: int                 # attempts before escalation
 ```
 
-The specialist's input is *this item plus the files under `allowed_paths`*. It never sees the full backlog, never sees other specialists' work, never sees ADRs it doesn't need. This is the same discipline we imposed on runtime collectors.
+The specialist's input is *this item plus the files under `allowed_paths`*. It never sees the full backlog, never sees other specialists' raw working history, never sees ADRs it doesn't need. This is the same discipline we imposed on runtime collectors.
+
+On completion, the specialist returns refined outputs for the Tech Lead to fold into `BuildState`: completed work, decisions made, interfaces satisfied, blockers discovered, and artifact references such as commit SHAs, PR URLs, and CI results.
 
 The specialist's output is a PR. Not a description of a PR, not a diff in chat — an actual branch with commits, opened against main, targeting only `allowed_paths`.
 

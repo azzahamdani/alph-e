@@ -5,7 +5,7 @@ An agentic system that receives incidents from Slack, diagnoses against cloud in
 Designed around two load-bearing constraints:
 
 1. **Observability data is enormous.** Raw log/trace/metric payloads must never touch agent context. Collectors summarise and reference; raw data lives in an evidence store.
-2. **Context sprawl kills agentic systems.** Memory lives in exactly one place (the orchestrator's `IncidentState`). Everything else is ephemeral and stateless.
+2. **Context sprawl kills agentic systems.** Durable working memory lives in exactly one place (the orchestrator's `IncidentState`). Everything else is ephemeral and stateless, consuming task-local context and returning refined outputs.
 
 ---
 
@@ -13,7 +13,8 @@ Designed around two load-bearing constraints:
 
 - **One collector per data source, stateless.** Each invocation is `(question, scope) → (finding, evidence_id)`. No cross-invocation memory, no drift.
 - **Evidence store as the shared substrate.** Raw payloads keyed by `evidence_id`. Agents pass references, never blobs.
-- **Single source of truth for incident state.** The orchestrator holds `IncidentState`; every other node receives a slice.
+- **Single source of truth for incident state.** The orchestrator holds `IncidentState`; every other node receives only the slice needed for its current task.
+- **Refine, don't retain.** Collectors and subagents burn tokens on heavy local context, then return compressed findings, evidence refs, and next-step signals. The orchestrator carries forward those refined outputs, never raw logs or full prior transcripts.
 - **Pre-flight remediation gate.** Not every investigation ends in a PR. A typed `RemediationPlan` decides: `pr`, `rollback`, `scale`, `flag_flip`, `runbook`, or `none`.
 - **Separated lifecycle from investigation.** Intake, Investigator, and Coordinator are distinct prompts with distinct responsibilities. Conflating them causes prompt drift.
 - **Structured escalation, not silent failure.** When the agent gives up, the human inherits hypotheses, evidence IDs, and attempt history.
@@ -52,6 +53,7 @@ Four layers, each with a different lifetime and retrieval pattern:
 **Key boundaries:**
 
 - Working state is the only memory always in context.
+- Working state is composed of refined state: hypotheses, findings, decisions, and evidence references derived from prior subagent runs.
 - Semantic memory is retrieved per step against the current hypothesis, not pre-loaded.
 - Episodic memory is queried once at intake: "have we seen this before?"
 - Entity memory is cached per service; cheap to maintain, expensive to recompute per turn.
@@ -66,6 +68,7 @@ Four layers, each with a different lifetime and retrieval pattern:
 **Deliberate choices:**
 
 - `IncidentState` is the only durable container. Collectors receive a `CollectorInput` slice, not the whole state.
+- `IncidentState` stores refined outputs from prior steps, not raw observability payloads or full collector transcripts.
 - `EvidenceRef` is a pointer, not content. Raw data lives at `storage_uri`; `expires_at` forces an explicit retention decision.
 - `RemediationPlan.type = none` is a valid output — "investigated, nothing to automate, handing off."
 - `investigation_attempts` is the single attempt counter, deliberately not duplicated across `FixProposal` or `CollectorInput`.
@@ -150,7 +153,7 @@ Escalation is a **handoff**, not a failure. The on-call engineer receives a stru
 
 ## Subagents and token management
 
-Investigation phases that generate a lot of tokens internally but only need to return a conclusion run as **subagents with their own context windows**. The orchestrator sends a task, the subagent burns tokens locally, returns a structured finding.
+Investigation phases that generate a lot of tokens internally but only need to return a conclusion run as **subagents with their own context windows**. The orchestrator sends a task seeded from the current refined incident state, the subagent burns tokens on heavy local context, and returns only a structured finding.
 
 ![subagents-dispatch](diagrams/subagents-dispatch.svg)
 
