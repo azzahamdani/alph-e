@@ -256,7 +256,7 @@ async def investigate_incident(incident: IncidentState, user_description: str) -
             client = anthropic.Anthropic(api_key=anthropic_key)
 
             message = client.messages.create(
-                model="claude-3-opus-20240229",
+                model="claude-sonnet-4-6",
                 max_tokens=300,
                 messages=[{"role": "user", "content": analysis_prompt}]
             )
