@@ -25,10 +25,13 @@ brew install k3d kubectl helm go-task
 ## Quick start
 
 ```
+export ANTHROPIC_API_KEY=sk-ant-...        # required for the in-cluster agent
 task up
 ```
 
-This runs: `cluster:up` → `monitoring:install` → `demo:deploy`, then prints the URLs.
+This runs: `cluster:up` → `monitoring:install` → `agent-infra:install` → `demo:deploy` → `agent:secret` → `collectors:deploy` → `agent:deploy` → `mcp:install`, then prints the URLs.
+
+Everything (monitoring, agent-infra, collectors, orchestrator, demo) runs in-cluster. The agent intake is reachable at `http://localhost:8000/webhook/alertmanager` via the k3d loadbalancer.
 
 Watch the OOM loop kick in:
 ```
@@ -64,42 +67,50 @@ task cluster:nuke     # removes everything including cached images
 
 ## The agent side
 
-Everything above is the **lab substrate** — the cluster the agent investigates.
-The agent itself lives in two sibling trees:
+The agent lives in three sibling trees, all dockerized and deployed into the `agent` namespace by `task up`:
 
-- [`agent/`](agent/) — Python orchestrator (LangGraph + FastAPI + Pydantic schemas)
-- [`collectors/`](collectors/) — Go services the orchestrator dispatches against
-- [`agent-infra/`](agent-infra/) — in-cluster Postgres + MinIO (agent deps)
+- [`agent/`](agent/) — Python orchestrator (LangGraph + FastAPI + Pydantic). [`Dockerfile`](agent/Dockerfile), [`manifests.yaml`](agent/manifests.yaml).
+- [`collectors/`](collectors/) — Go collectors the orchestrator dispatches against. One [`Dockerfile`](collectors/Dockerfile), three Deployments via [`manifests.yaml`](collectors/manifests.yaml); kube-collector uses in-cluster ServiceAccount auth.
+- [`agent-infra/`](agent-infra/) — Helm-managed Postgres (pgvector) + MinIO, 30-day evidence lifecycle.
 
-Quick start (in addition to `task up`):
+### In-cluster operations
 
 ```
-task agent-infra:install    # Postgres + MinIO (Helm, in-cluster)
+task agent:secret           # (re-)seed agent-secrets from $ANTHROPIC_API_KEY + agent-infra defaults
+task agent:deploy           # build + push + roll out the orchestrator
+task collectors:deploy      # build + push + roll out prom/loki/kube collectors
+task agent:logs             # tail orchestrator logs
+task collectors:logs        # tail all three collectors (prefixed by pod)
+task agent:forward          # port-forward the intake to localhost:8000 (dev access)
+```
+
+### Host-side dev loop (uvicorn `--reload`, no redeploy)
+
+```
+task agent-infra:install    # Postgres + MinIO in-cluster
 task agent:install          # uv sync
 task agent:test             # schemas + routing + intake
 task collectors:test        # go test ./...
 task monitoring:alerts      # apply the PrometheusRule that fires the OOM alert
-task agent:serve            # FastAPI on :8000 — Alertmanager's target
-task collectors:run         # three services on :8001 / :8002 / :8003
-```
+task agent:serve            # FastAPI on host :8000 with --reload
+task collectors:run         # three host processes on :8001 / :8002 / :8003
 
-For host access to the agent-infra services, run in separate terminals:
-
-```
+# separate terminals, for host access to agent-infra:
 task agent-infra:postgres   # → localhost:5432
 task agent-infra:minio      # → localhost:9000 / :9001
 ```
+
+The Alertmanager config POSTs to the in-cluster agent (`http://agent.agent.svc.cluster.local:8000/webhook/alertmanager`); for host-side alert testing, fire fixtures with `task agent:fire` instead.
 
 Design docs and ADRs:
 
 - Architecture: [`docs/devops-agent-architecture.md`](docs/devops-agent-architecture.md)
 - Build fleet: [`docs/devops-agent-build-fleet.md`](docs/devops-agent-build-fleet.md)
-- Decisions: [`docs/adr/`](docs/adr/) (0001–0007)
+- Decisions: [`docs/adr/`](docs/adr/) (0001–0008)
 - Build-fleet subagents: [`.claude/agents/`](.claude/agents/)
 - Work item backlog: [`backlog/`](backlog/)
 
 ## Next steps
 
-- Replace the skeleton nodes in `agent/src/agent/orchestrator/nodes/` with real reasoning (WI-010–012)
-- Replace the collector stubs in `collectors/cmd/*` with PromQL/LogQL/client-go dispatch (WI-005–007)
-- Add a second failure mode (readiness probe timeout) once the first investigation works end-to-end
+- Fire the canned OOM fixture end-to-end: `task agent:forward` in one terminal, `task agent:fire` in another (or wait ~5 min for Alertmanager to POST via `task monitoring:alerts`).
+- Add a second failure mode (readiness probe timeout) once the first investigation works end-to-end.

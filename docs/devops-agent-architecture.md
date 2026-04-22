@@ -325,18 +325,20 @@ A small Kubernetes cluster (kind / k3d / minikube, or a single-node EKS/GKE dev 
 
 The k3d cluster hosts both the target environment (demo workloads + monitoring stack) and the agent-side infrastructure:
 
-| Component | Namespace | Purpose | Access (MVP1) |
+| Component | Namespace | Purpose | Access |
 |---|---|---|---|
-| **Postgres** | `agent-infra` | Evidence metadata + LangGraph checkpoints | `task agent-infra:postgres` (localhost:5432) |
-| **MinIO** | `agent-infra` | Evidence blob storage with 30-day lifecycle | `task agent-infra:minio` (API: localhost:9000, console: localhost:9001) |
-| **FalkorDB** | `agent-infra` | Graphiti's episodic/semantic/entity memory | Not yet deployed (see `backlog/WI-016-agent-infra-falkordb.yaml`) |
-| **Agent** | host (MVP1) / in-cluster (MVP2) | Orchestrator + intake + reasoning nodes | Host-side uv process in MVP1 |
+| **Postgres** | `agent-infra` | Evidence metadata + LangGraph checkpoints | In-cluster: `postgres.agent-infra.svc.cluster.local:5432`. Host: `task agent-infra:postgres` port-forward. |
+| **MinIO** | `agent-infra` | Evidence blob storage with 30-day lifecycle | In-cluster: `minio.agent-infra.svc.cluster.local:9000`. Host: `task agent-infra:minio` (API: localhost:9000, console: localhost:9001). |
+| **FalkorDB** | `agent-infra` | Graphiti's episodic/semantic/entity memory | Not yet deployed (see `backlog/WI-016-agent-infra-falkordb.yaml`). |
+| **Collectors** | `agent` | prom / loki / kube collectors | In-cluster Deployments + Services at `<name>.agent.svc.cluster.local:800{1,2,3}`. kube-collector uses in-cluster ServiceAccount auth (`--in-cluster`). |
+| **Agent** | `agent` | Orchestrator + intake + reasoning nodes | In-cluster Deployment at `agent.agent.svc.cluster.local:8000`. Host access via k3d LB on `:8000` or `task agent:forward`. |
 
 - **Postgres**: Bitnami postgresql chart with pgvector image override (`pgvector/pgvector:pg16`). 4Gi PVC on local-path. Configuration at `agent-infra/values/postgresql.values.yaml`.
 - **MinIO**: Official minio/minio chart, standalone mode with 10Gi PVC. Creates `incidents` bucket natively. 30-day lifecycle rule applied via post-install Job at `agent-infra/manifests/minio-lifecycle-job.yaml`.
 - **FalkorDB**: Graph backend for Graphiti's memory layer. Runs in-cluster in the `agent-infra` namespace alongside Postgres and MinIO. Deployment is tracked as WI-016 — not yet implemented.
+- **Agent + collectors**: one Dockerfile per side (`agent/Dockerfile`, `collectors/Dockerfile` — single image, three binaries). Plain manifests under `agent/manifests.yaml` + `collectors/manifests.yaml`, both in the `agent` namespace. Credentials (Anthropic key, Postgres URL, MinIO creds) flow through the `agent-secrets` Secret, seeded by `task agent:secret`.
 
-**Bring-up**: `task up` orchestrates cluster creation, monitoring installation, agent-infra deployment, and demo workload. Host-side access to cluster services is via port-forwards during MVP1 (agent on host), transitioning to internal service DNS in MVP2 (agent in-cluster).
+**Bring-up**: `task up` orchestrates cluster creation, monitoring, agent-infra, demo workload, collector images + Deployments, and the agent image + Deployment. Everything except the developer's own tooling runs inside the k3d cluster. A dedicated host-side loop (`task agent:serve` + `task collectors:run`) is preserved for uvicorn `--reload` development.
 
 ### What MVP1 deliberately does *not* cover
 

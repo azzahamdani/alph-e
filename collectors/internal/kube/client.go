@@ -8,9 +8,9 @@
 //  2. $KUBECONFIG        — standard kubectl env override.
 //  3. ~/.kube/config     — default location.
 //
-// In-cluster auth is deliberately excluded — the collector always needs a
-// named kubeconfig so the Investigator can reason about which cluster is
-// being queried.
+// When the collector runs inside the cluster (see NewInClusterClientset), the
+// kubeconfig path is bypassed and the pod's ServiceAccount token is used
+// instead.
 package kube
 
 import (
@@ -19,6 +19,7 @@ import (
 	"path/filepath"
 
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 )
 
@@ -88,6 +89,30 @@ func NewClientset() (kubernetes.Interface, error) {
 		return nil, &KubeconfigError{
 			Path:   kubeconfigPath,
 			Source: source,
+			Cause:  fmt.Errorf("build clientset: %w", err),
+		}
+	}
+	return cs, nil
+}
+
+// NewInClusterClientset builds a kubernetes.Interface from the pod's mounted
+// ServiceAccount token (/var/run/secrets/kubernetes.io/serviceaccount). Used
+// when the collector runs as a Deployment inside the target cluster.
+//
+// On failure it returns a *KubeconfigError with Source="in-cluster" so the
+// degraded-collector path surfaces the error the same way as a bad kubeconfig.
+func NewInClusterClientset() (kubernetes.Interface, error) {
+	restCfg, err := rest.InClusterConfig()
+	if err != nil {
+		return nil, &KubeconfigError{
+			Source: "in-cluster",
+			Cause:  err,
+		}
+	}
+	cs, err := kubernetes.NewForConfig(restCfg)
+	if err != nil {
+		return nil, &KubeconfigError{
+			Source: "in-cluster",
 			Cause:  fmt.Errorf("build clientset: %w", err),
 		}
 	}

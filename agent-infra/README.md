@@ -12,18 +12,24 @@ Replaces the old host-side `infra/docker-compose.yaml`. See the successor ADR fo
 
 ## Access
 
-**MVP1 — agent runs on your host:** port-forwards preserve the `localhost:5432` / `localhost:9000` interface the agent code already expects. No `EvidenceClient` changes needed.
+**In-cluster agent (the default — MVP2, live):** the agent + collectors read
+their connection settings from the `agent-secrets` Secret in the `agent`
+namespace, which defaults to internal service DNS:
+
+```
+POSTGRES_URL=postgresql://devops:devops@postgres.agent-infra.svc.cluster.local:5432/incidents
+EVIDENCE_S3_ENDPOINT=http://minio.agent-infra.svc.cluster.local:9000
+```
+
+Seed or refresh the Secret with `task agent:secret`; override any field via
+env vars in your shell before running it.
+
+**Host-side dev loop:** port-forward each dependency to its familiar
+localhost address — matches what `EvidenceClient` uses by default:
 
 ```
 task agent-infra:postgres    # → localhost:5432
 task agent-infra:minio       # → localhost:9000 (API) + localhost:9001 (console)
-```
-
-**MVP2 — agent runs in-cluster:** internal service DNS. `EvidenceClient` settings switch to:
-
-```
-POSTGRES_URL=postgres://devops:devops@postgres.agent-infra.svc.cluster.local:5432/incidents
-EVIDENCE_S3_ENDPOINT=http://minio.agent-infra.svc.cluster.local:9000
 ```
 
 ## Credentials (lab only)
@@ -42,7 +48,7 @@ These match the old compose defaults so the migration is drop-in. Lab-only crede
 agent-infra/
 ├── values/
 │   ├── postgresql.values.yaml   # Bitnami chart, pgvector image override
-│   └── minio.values.yaml        # Bitnami chart, standalone mode
+│   └── minio.values.yaml        # official minio/minio chart, standalone mode
 └── manifests/
-    └── bucket-bootstrap-job.yaml   # one-shot: mc mb + ilm rule
+    └── minio-lifecycle-job.yaml   # one-shot: apply the 30-day lifecycle rule
 ```

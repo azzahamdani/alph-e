@@ -14,8 +14,8 @@ You are an **evidence-store specialist**. Operating manual: `docs/devops-agent-b
 ## Inputs
 
 - Serialised `WorkItem`.
-- ADRs: ADR-0006 (evidence store — MinIO blobs + Postgres metadata, 30-day TTL) is load-bearing. ADR-0001 (language split) and ADR-0002 (Python toolchain) set ground rules.
-- Existing infra: MinIO and Postgres are guaranteed up via `task infra:up` during tests.
+- ADRs: ADR-0006 (evidence store — MinIO blobs + Postgres metadata, 30-day TTL) is load-bearing; ADR-0008 supersedes its deployment mechanics (Helm, in-cluster). ADR-0001 (language split) and ADR-0002 (Python toolchain) set ground rules.
+- Existing infra: MinIO and Postgres run in-cluster under the `agent-infra` namespace; `task agent-infra:install` installs them and `task agent-infra:postgres` / `task agent-infra:minio` port-forward them for host-side tests.
 
 ## Hard rules
 
@@ -28,7 +28,10 @@ You are an **evidence-store specialist**. Operating manual: `docs/devops-agent-b
 
 ```
 cd agent && uv sync
-task infra:up   # expected to be up already; this is idempotent
+task agent-infra:install   # idempotent; ensures Postgres + MinIO are in the cluster
+# In separate terminals (host tests reach the services via port-forwards):
+#   task agent-infra:postgres   → localhost:5432
+#   task agent-infra:minio      → localhost:9000 / :9001
 uv run ruff check src/agent/evidence tests
 uv run mypy src/agent/evidence
 uv run pytest tests/unit -q

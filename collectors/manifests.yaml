@@ -1,0 +1,244 @@
+# Collectors deployed into the `agent` namespace.
+#
+# One image (registry.localhost:5000/devops-collectors:latest), three
+# Deployments. Each Deployment's `command:` selects which binary to run.
+#
+# - prom-collector :8001   - HTTP proxy to Prometheus
+# - loki-collector :8002   - HTTP proxy to Loki
+# - kube-collector :8003   - read-only Kubernetes API queries
+#
+# The `agent` namespace is declared in agent/manifests.yaml; apply that first
+# (or apply both with `kubectl apply -f collectors/manifests.yaml` after
+# `kubectl apply -f agent/manifests.yaml`).
+---
+# ── prom-collector ─────────────────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: prom-collector
+  namespace: agent
+  labels:
+    app: prom-collector
+    component: collector
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: prom-collector
+  template:
+    metadata:
+      labels:
+        app: prom-collector
+        component: collector
+    spec:
+      containers:
+        - name: collector
+          image: registry.localhost:5000/devops-collectors:latest
+          imagePullPolicy: Always
+          command: ["/usr/local/bin/prom-collector"]
+          args: ["--addr", ":8001", "--bucket", "incidents"]
+          ports:
+            - name: http
+              containerPort: 8001
+          env:
+            - name: PROMETHEUS_URL
+              value: "http://kps-prometheus.monitoring.svc.cluster.local:9090"
+          envFrom:
+            - secretRef:
+                name: agent-secrets
+          resources:
+            requests:
+              cpu: 20m
+              memory: 64Mi
+            limits:
+              memory: 256Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: prom-collector
+  namespace: agent
+  labels:
+    app: prom-collector
+spec:
+  type: ClusterIP
+  selector:
+    app: prom-collector
+  ports:
+    - name: http
+      port: 8001
+      targetPort: http
+---
+# ── loki-collector ─────────────────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: loki-collector
+  namespace: agent
+  labels:
+    app: loki-collector
+    component: collector
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: loki-collector
+  template:
+    metadata:
+      labels:
+        app: loki-collector
+        component: collector
+    spec:
+      containers:
+        - name: collector
+          image: registry.localhost:5000/devops-collectors:latest
+          imagePullPolicy: Always
+          command: ["/usr/local/bin/loki-collector"]
+          args:
+            - "--addr"
+            - ":8002"
+            - "--bucket"
+            - "incidents"
+            - "--loki-url"
+            - "http://loki.monitoring.svc.cluster.local:3100"
+          ports:
+            - name: http
+              containerPort: 8002
+          envFrom:
+            - secretRef:
+                name: agent-secrets
+          resources:
+            requests:
+              cpu: 20m
+              memory: 64Mi
+            limits:
+              memory: 256Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: loki-collector
+  namespace: agent
+  labels:
+    app: loki-collector
+spec:
+  type: ClusterIP
+  selector:
+    app: loki-collector
+  ports:
+    - name: http
+      port: 8002
+      targetPort: http
+---
+# ── kube-collector ─────────────────────────────────────────────────────────
+# Needs a ServiceAccount with read-only access to the resources it queries.
+# Uses in-cluster auth (--in-cluster) — no kubeconfig mount required.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: kube-collector
+  namespace: agent
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kube-collector-read
+rules:
+  - apiGroups: [""]
+    resources:
+      - pods
+      - pods/log
+      - events
+      - nodes
+      - namespaces
+      - services
+      - configmaps
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["apps"]
+    resources:
+      - deployments
+      - replicasets
+      - statefulsets
+      - daemonsets
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["events.k8s.io"]
+    resources: ["events"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["metrics.k8s.io"]
+    resources:
+      - pods
+      - nodes
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: kube-collector-read
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: kube-collector-read
+subjects:
+  - kind: ServiceAccount
+    name: kube-collector
+    namespace: agent
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kube-collector
+  namespace: agent
+  labels:
+    app: kube-collector
+    component: collector
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kube-collector
+  template:
+    metadata:
+      labels:
+        app: kube-collector
+        component: collector
+    spec:
+      serviceAccountName: kube-collector
+      containers:
+        - name: collector
+          image: registry.localhost:5000/devops-collectors:latest
+          imagePullPolicy: Always
+          command: ["/usr/local/bin/kube-collector"]
+          args:
+            - "--addr"
+            - ":8003"
+            - "--bucket"
+            - "incidents"
+            - "--in-cluster"
+          ports:
+            - name: http
+              containerPort: 8003
+          envFrom:
+            - secretRef:
+                name: agent-secrets
+          resources:
+            requests:
+              cpu: 20m
+              memory: 64Mi
+            limits:
+              memory: 256Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kube-collector
+  namespace: agent
+  labels:
+    app: kube-collector
+spec:
+  type: ClusterIP
+  selector:
+    app: kube-collector
+  ports:
+    - name: http
+      port: 8003
+      targetPort: http

@@ -29,10 +29,10 @@ alertmanager:
         memory: 32Mi
       limits:
         memory: 128Mi
-  # Route every firing alert to the host-side agent's Intake webhook.
-  # `host.k3d.internal` is the k3d-provided alias for the host machine — see
-  # ADR-0005 for the rationale and fallback. Resolved inside the cluster via
-  # the kube-prometheus-stack chart's Alertmanager config template.
+  # Route every firing alert to the in-cluster agent's Intake webhook.
+  # The agent Deployment lives in the `agent` namespace (see agent/manifests.yaml
+  # and ADR-0005). For host-side dev (`task agent:serve`), fire fixtures via
+  # `task agent:fire` instead — Alertmanager cannot reach the host from here.
   config:
     global:
       resolve_timeout: 5m
@@ -49,7 +49,7 @@ alertmanager:
       - name: "null"
       - name: alph-e-agent
         webhook_configs:
-          - url: http://host.k3d.internal:8000/webhook/alertmanager
+          - url: http://agent.agent.svc.cluster.local:8000/webhook/alertmanager
             send_resolved: true
             max_alerts: 0
 

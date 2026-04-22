@@ -22,5 +22,6 @@ Load-bearing decisions about this project, referenced by ID from:
 | [0003](0003-go-toolchain-gomod-golangcilint-testify.md) | Go toolchain: Go modules + golangci-lint + testify | accepted |
 | [0004](0004-runtime-framework-langgraph.md) | Runtime orchestrator framework: LangGraph | accepted |
 | [0005](0005-intake-entry-alertmanager-webhook.md) | Intake entry point: Alertmanager webhook | accepted |
-| [0006](0006-evidence-store-minio-postgres.md) | Evidence store: MinIO blobs + Postgres metadata | accepted |
+| [0006](0006-evidence-store-minio-postgres.md) | Evidence store: MinIO blobs + Postgres metadata | superseded by 0008 |
 | [0007](0007-build-fleet-claude-code-subagents.md) | Build fleet option: Claude Code subagents | accepted |
+| [0008](0008-agent-infra-in-cluster.md) | Agent infrastructure in-cluster migration | accepted |

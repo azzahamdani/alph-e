@@ -118,7 +118,7 @@ task agent-infra:minio      # port-forward localhost:9000
 
 ### What's next (post-MVP1)
 
-1. **Live cluster run**: `task up` → `task agent-infra:install` → `task agent:serve` → `task agent:fire` to fire the real OOM alert
-2. **Integration tests with real infra**: `task agent:test -- -m integration` (needs Postgres + MinIO up)
-3. **Haiku for Intake/Coordinator**: swap `claude-sonnet-4-6` to `claude-haiku-4-5-20251001` for faster/cheaper routing nodes
-4. **PR submission**: Coordinator's `type=pr` path triggers Dev → Verifier → Reviewer → real GitHub PR
+1. **Live in-cluster run** (default as of 2026-04-22): `export ANTHROPIC_API_KEY=... && task up` deploys cluster + monitoring + agent-infra + demo + collectors + agent. Port-forward the intake with `task agent:forward` and either wait for `PodOOMKilled` to fire or `task agent:fire` the fixture directly.
+2. **Integration tests with real infra**: `task agent:test -- -m integration` (needs `task agent-infra:postgres` + `task agent-infra:minio` port-forwards in extra terminals).
+3. **Haiku for Intake/Coordinator**: swap `claude-sonnet-4-6` to `claude-haiku-4-5-20251001` for faster/cheaper routing nodes.
+4. **PR submission**: Coordinator's `type=pr` path triggers Dev → Verifier → Reviewer → real GitHub PR.

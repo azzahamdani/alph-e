@@ -90,17 +90,27 @@ func suggestedFollowups(in contract.CollectorInput, dr kube.DispatchResult) []st
 func main() {
 	addr := flag.String("addr", ":8003", "listen address")
 	bucket := flag.String("bucket", "incidents", "MinIO bucket for evidence blobs")
+	inCluster := flag.Bool("in-cluster", false, "use the pod's ServiceAccount token instead of a kubeconfig file")
 	flag.Parse()
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
 
-	// Build kubeconfig-backed clientset. A failure here is not fatal -- we
-	// serve a degraded collector that returns the error in every Finding so
-	// the Investigator knows to fix the kubeconfig before retrying.
-	cs, kubeErr := kube.NewClientset()
+	// Build clientset. A failure here is not fatal -- we serve a degraded
+	// collector that returns the error in every Finding so the Investigator
+	// knows to fix the auth config before retrying.
+	var (
+		cs      kubernetes.Interface
+		kubeErr error
+	)
+	if *inCluster {
+		cs, kubeErr = kube.NewInClusterClientset()
+	} else {
+		cs, kubeErr = kube.NewClientset()
+	}
 	if kubeErr != nil {
-		logger.Warn("kubeconfig load failed -- collector will surface error in every Finding",
-			slog.String("reason", kubeErr.Error()))
+		logger.Warn("kube auth load failed -- collector will surface error in every Finding",
+			slog.String("reason", kubeErr.Error()),
+			slog.Bool("in_cluster", *inCluster))
 	}
 
 	var w evidence.Writer

@@ -23,8 +23,8 @@ Replace the host-side docker-compose stack with in-cluster Helm deployments:
 - **Deployment target**: `agent-infra` namespace in the existing k3d cluster.
 
 - **Access model**:
-  - MVP1: Agent runs on host, reaches dependencies via `task agent-infra:postgres` (localhost:5432) and `task agent-infra:minio` (localhost:9000 API + localhost:9001 console) port-forwards.
-  - MVP2: Agent runs in-cluster, reaches dependencies via internal service DNS (`postgres.agent-infra.svc.cluster.local:5432`, `minio.agent-infra.svc.cluster.local:9000`).
+  - Host-side dev loop: agent reaches dependencies via `task agent-infra:postgres` (localhost:5432) and `task agent-infra:minio` (localhost:9000 API + localhost:9001 console) port-forwards.
+  - In-cluster (the default as of 2026-04-22): agent + collectors reach dependencies via internal service DNS (`postgres.agent-infra.svc.cluster.local:5432`, `minio.agent-infra.svc.cluster.local:9000`) through env vars in the `agent-secrets` Secret.
 
 - **Credentials preserved**: devops/devops for Postgres, minio/minio-dev-secret for MinIO. Same bucket name (`incidents`), same TTL (30 days). EvidenceClient code unchanged during cutover.
 
@@ -45,3 +45,5 @@ Replace the host-side docker-compose stack with in-cluster Helm deployments:
 
 **Migration path:**
 Interface preserved across the cutover — same ports, same credentials, same bucket, same TTL policy, same pgvector extension. EvidenceClient, schema migrations, and lifecycle enforcement code didn't require changes. Test fixtures and development workflows remain valid.
+
+**Follow-on (2026-04-22):** the agent orchestrator and Go collectors now also run in-cluster, in the `agent` namespace. See `agent/Dockerfile`, `collectors/Dockerfile`, `agent/manifests.yaml`, `collectors/manifests.yaml`, and the `agent-secrets` Secret seeded by `task agent:secret`. The Alertmanager webhook URL moved from `http://host.k3d.internal:8000/...` to `http://agent.agent.svc.cluster.local:8000/webhook/alertmanager` ([ADR-0005](0005-intake-entry-alertmanager-webhook.md)).

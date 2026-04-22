@@ -26,6 +26,10 @@ ports:
   - port: 8080:8080
     nodeFilters:
       - loadbalancer
+  # Agent intake (FastAPI webhook) — Alertmanager / `task agent:fire` POST here
+  - port: 8000:8000
+    nodeFilters:
+      - loadbalancer
 registries:
   create:
     name: registry.localhost

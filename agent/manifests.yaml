@@ -1,0 +1,92 @@
+# Agent orchestrator deployed into the `agent` namespace.
+#
+# The `agent-secrets` Secret is the single source of truth for sensitive config
+# (Postgres URL, MinIO creds, Anthropic API key) and is consumed by both the
+# agent Deployment and the collector Deployments (via `envFrom: secretRef`).
+#
+# The Secret is seeded from the operator's environment via `task agent:secret`
+# so credentials never land in git.
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: agent
+  labels:
+    # Allow Prometheus to scrape across namespaces (matches `demo` pattern).
+    monitoring: enabled
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agent
+  namespace: agent
+  labels:
+    app: agent
+    component: orchestrator
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate  # Single-replica lab; avoid rolling two Postgres-checkpointed graphs.
+  selector:
+    matchLabels:
+      app: agent
+  template:
+    metadata:
+      labels:
+        app: agent
+        component: orchestrator
+    spec:
+      containers:
+        - name: agent
+          image: registry.localhost:5000/devops-agent:latest
+          imagePullPolicy: Always
+          ports:
+            - name: http
+              containerPort: 8000
+          env:
+            # Collector endpoints — resolved via in-cluster DNS.
+            - name: COLLECTOR_PROM_URL
+              value: "http://prom-collector.agent.svc.cluster.local:8001"
+            - name: COLLECTOR_LOKI_URL
+              value: "http://loki-collector.agent.svc.cluster.local:8002"
+            - name: COLLECTOR_KUBE_URL
+              value: "http://kube-collector.agent.svc.cluster.local:8003"
+          envFrom:
+            - secretRef:
+                name: agent-secrets
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 20
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 50m
+              memory: 256Mi
+            limits:
+              memory: 1Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: agent
+  namespace: agent
+  labels:
+    app: agent
+spec:
+  type: ClusterIP
+  selector:
+    app: agent
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http

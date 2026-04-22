@@ -12,6 +12,10 @@ Endpoint discovery:
 Defaults to ``http://localhost:808{1,2,3}`` if the env vars are absent (useful
 for local development without k3d).
 
+In-cluster, the agent Deployment sets these env vars explicitly to the
+collector ``Service`` DNS names (e.g. ``http://prom-collector.agent.svc:8001``),
+so the localhost defaults are never hit.
+
 Timeout: 30s hard cap per collector call (B-02 guardrail).
 """
 

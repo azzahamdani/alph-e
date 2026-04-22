@@ -120,6 +120,12 @@ tasks:
       - echo "Alertmanager → http://localhost:9093"
       - kubectl -n {{.MONITORING_NS}} port-forward svc/kps-alertmanager 9093:9093
 
+  loki:
+    desc: Port-forward Loki to http://localhost:3100 (required for loki-collector on the host)
+    cmds:
+      - echo "Loki → http://localhost:3100"
+      - kubectl -n {{.MONITORING_NS}} port-forward svc/loki 3100:3100
+
   # ── Demo app ─────────────────────────────────────────────────────────
 
   demo:build:
@@ -197,12 +203,15 @@ tasks:
   # ── Everything ───────────────────────────────────────────────────────
 
   up:
-    desc: Full bootstrap — cluster + monitoring + agent-infra + demo + mcp
+    desc: Full bootstrap — cluster + monitoring + agent-infra + demo + agent + collectors + mcp
     cmds:
       - task: cluster:up
       - task: monitoring:install
       - task: agent-infra:install
       - task: demo:deploy
+      - task: agent:secret
+      - task: collectors:deploy
+      - task: agent:deploy
       - task: mcp:install
       - task: urls
 
@@ -215,7 +224,12 @@ tasks:
         echo "    task grafana                → http://localhost:3000  (admin / admin)"
         echo "    task prometheus             → http://localhost:9090"
         echo "    task alertmanager           → http://localhost:9093"
-        echo "    task mcp:forward            → http://localhost:8000/mcp"
+        echo "    task mcp:forward            → http://localhost:8000/mcp (conflicts with agent LB port)"
+        echo ""
+        echo "  Agent (in-cluster):"
+        echo "    task agent:logs             → tail orchestrator logs"
+        echo "    task agent:forward          → localhost:8000 (POST /webhook/alertmanager)"
+        echo "    task collectors:logs        → tail all three collectors"
         echo ""
         echo "  Agent-infra (cluster-internal; port-forward for host access):"
         echo "    task agent-infra:postgres   → localhost:5432"
@@ -254,7 +268,7 @@ tasks:
       - uv run pytest -q
 
   agent:serve:
-    desc: Start the Intake FastAPI on :8000
+    desc: Start the Intake FastAPI on :8000 (host-side dev loop)
     dir: agent
     cmds:
       - uv run python -m agent serve --reload
@@ -265,6 +279,61 @@ tasks:
     cmds:
       - uv run python -m agent fire
         tests/fixtures/incidents/oom-leaky-service.json
+
+  # ── Agent (in-cluster) ───────────────────────────────────────────────
+
+  agent:image:
+    desc: Build and push the agent image to the local registry
+    dir: agent
+    cmds:
+      - docker build -t {{.REGISTRY}}/devops-agent:latest .
+      - docker push {{.REGISTRY}}/devops-agent:latest
+
+  agent:secret:
+    desc: Create/refresh the agent-secrets Secret from the operator's environment
+    cmds:
+      - |
+        # Required: ANTHROPIC_API_KEY (user must export before running this).
+        # Others default to the in-cluster agent-infra values.
+        : "${ANTHROPIC_API_KEY:?ANTHROPIC_API_KEY must be set in your shell before running this task}"
+        POSTGRES_URL="${POSTGRES_URL:-postgresql://devops:devops@postgres.agent-infra.svc.cluster.local:5432/incidents}"
+        EVIDENCE_S3_ENDPOINT="${EVIDENCE_S3_ENDPOINT:-http://minio.agent-infra.svc.cluster.local:9000}"
+        EVIDENCE_S3_ACCESS_KEY="${EVIDENCE_S3_ACCESS_KEY:-minio}"
+        EVIDENCE_S3_SECRET_KEY="${EVIDENCE_S3_SECRET_KEY:-minio-dev-secret}"
+        EVIDENCE_S3_BUCKET="${EVIDENCE_S3_BUCKET:-incidents}"
+
+        kubectl create namespace agent --dry-run=client -o yaml | kubectl apply -f -
+        kubectl -n agent create secret generic agent-secrets \
+          --from-literal=ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY" \
+          --from-literal=POSTGRES_URL="$POSTGRES_URL" \
+          --from-literal=EVIDENCE_S3_ENDPOINT="$EVIDENCE_S3_ENDPOINT" \
+          --from-literal=EVIDENCE_S3_ACCESS_KEY="$EVIDENCE_S3_ACCESS_KEY" \
+          --from-literal=EVIDENCE_S3_SECRET_KEY="$EVIDENCE_S3_SECRET_KEY" \
+          --from-literal=EVIDENCE_S3_BUCKET="$EVIDENCE_S3_BUCKET" \
+          --dry-run=client -o yaml | kubectl apply -f -
+
+  agent:deploy:
+    desc: Build, push, and deploy the agent (requires `task agent:secret` first)
+    deps: [ agent:image ]
+    cmds:
+      - kubectl apply -f agent/manifests.yaml
+      - kubectl -n agent rollout status deployment/agent --timeout=120s
+
+  agent:undeploy:
+    desc: Remove the agent Deployment/Service (keeps Namespace + Secret)
+    cmds:
+      - kubectl delete -f agent/manifests.yaml --ignore-not-found
+
+  agent:logs:
+    desc: Tail in-cluster agent logs
+    cmds:
+      - kubectl -n agent logs -f deployment/agent
+
+  agent:forward:
+    desc: Port-forward the in-cluster agent intake to localhost:8000
+    cmds:
+      - echo "Agent intake → http://localhost:8000  (POST /webhook/alertmanager)"
+      - kubectl -n agent port-forward svc/agent 8000:8000
 
   # ── Collectors (Go) ──────────────────────────────────────────────────
 
@@ -287,10 +356,38 @@ tasks:
       - make build
 
   collectors:run:
-    desc: Run all three collectors on :8001 / :8002 / :8003
+    desc: Run all three collectors on :8001 / :8002 / :8003 (host-side)
     dir: collectors
     cmds:
       - make run
+
+  # ── Collectors (in-cluster) ──────────────────────────────────────────
+
+  collectors:image:
+    desc: Build and push the collectors image (one image, three binaries)
+    dir: collectors
+    cmds:
+      - docker build -t {{.REGISTRY}}/devops-collectors:latest .
+      - docker push {{.REGISTRY}}/devops-collectors:latest
+
+  collectors:deploy:
+    desc: Build, push, and deploy prom/loki/kube collectors
+    deps: [ collectors:image ]
+    cmds:
+      - kubectl apply -f collectors/manifests.yaml
+      - kubectl -n agent rollout status deployment/prom-collector --timeout=120s
+      - kubectl -n agent rollout status deployment/loki-collector --timeout=120s
+      - kubectl -n agent rollout status deployment/kube-collector --timeout=120s
+
+  collectors:undeploy:
+    desc: Remove all three collectors (keeps Namespace + Secret)
+    cmds:
+      - kubectl delete -f collectors/manifests.yaml --ignore-not-found
+
+  collectors:logs:
+    desc: Tail logs for all three collectors
+    cmds:
+      - kubectl -n agent logs -f -l component=collector --all-containers --prefix=true --tail=50
 
   # ── Agent-infra (Postgres + MinIO, in-cluster) ───────────────────────
   # Replaces the old host-side docker-compose stack. Helm-based.
@@ -393,6 +490,7 @@ tasks:
         echo "  agent-infra is up. In separate terminals run:"
         echo "    task agent-infra:postgres   # localhost:5432"
         echo "    task agent-infra:minio      # localhost:9000 / :9001"
-        echo "    task collectors:run         # ports 8001/8002/8003"
+        echo "    task loki                   # localhost:3100 (needed by loki-collector)"
+        echo "    LOKI_URL=http://localhost:3100 task collectors:run  # ports 8001/8002/8003"
         echo "    task agent:serve            # port 8000 (Alertmanager target)"
         echo ""
