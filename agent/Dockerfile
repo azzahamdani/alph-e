@@ -46,7 +46,7 @@ RUN groupadd --system --gid 1000 agent \
 COPY --from=builder --chown=agent:agent /opt/venv /opt/venv
 COPY --from=builder --chown=agent:agent /build/src /app/src
 
-WORKDIR /app
+WORKDIR /app/src
 USER agent
 
 EXPOSE 8000
