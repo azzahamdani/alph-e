@@ -138,12 +138,15 @@ async def alertmanager_webhook(payload: AlertmanagerPayload) -> IntakeResponse:
 
 def build_app(extra_routes: list[APIRouter] | None = None) -> FastAPI:
     """Factory so tests can mount a fresh app without import-time side effects."""
+    from agent.intake.slack import router as slack_router
+
     app = FastAPI(
         title="alph-e intake",
         version="0.0.1",
         description="DevOps investigation agent — inbound webhook surface.",
     )
     app.include_router(router)
+    app.include_router(slack_router)
     for extra in extra_routes or []:
         app.include_router(extra)
 

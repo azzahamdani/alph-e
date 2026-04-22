@@ -121,7 +121,8 @@ tasks:
       - kubectl -n {{.MONITORING_NS}} port-forward svc/kps-alertmanager 9093:9093
 
   loki:
-    desc: Port-forward Loki to http://localhost:3100 (required for loki-collector on the host)
+    desc: Port-forward Loki to http://localhost:3100 (required for loki-collector on
+      the host)
     cmds:
       - echo "Loki → http://localhost:3100"
       - kubectl -n {{.MONITORING_NS}} port-forward svc/loki 3100:3100
@@ -203,7 +204,8 @@ tasks:
   # ── Everything ───────────────────────────────────────────────────────
 
   up:
-    desc: Full bootstrap — cluster + monitoring + agent-infra + demo + agent + collectors + mcp
+    desc: Full bootstrap — cluster + monitoring + agent-infra + demo + agent +
+      collectors + mcp
     cmds:
       - task: cluster:up
       - task: monitoring:install
@@ -295,12 +297,15 @@ tasks:
       - |
         # Required: ANTHROPIC_API_KEY (user must export before running this).
         # Others default to the in-cluster agent-infra values.
+        # Optional: SLACK_BOT_TOKEN, DEVOPS_ALFIE_CHANNEL for Slack integration
         : "${ANTHROPIC_API_KEY:?ANTHROPIC_API_KEY must be set in your shell before running this task}"
         POSTGRES_URL="${POSTGRES_URL:-postgresql://devops:devops@postgres.agent-infra.svc.cluster.local:5432/incidents}"
         EVIDENCE_S3_ENDPOINT="${EVIDENCE_S3_ENDPOINT:-http://minio.agent-infra.svc.cluster.local:9000}"
         EVIDENCE_S3_ACCESS_KEY="${EVIDENCE_S3_ACCESS_KEY:-minio}"
         EVIDENCE_S3_SECRET_KEY="${EVIDENCE_S3_SECRET_KEY:-minio-dev-secret}"
         EVIDENCE_S3_BUCKET="${EVIDENCE_S3_BUCKET:-incidents}"
+        SLACK_BOT_TOKEN="${SLACK_BOT_TOKEN:-}"
+        DEVOPS_ALFIE_CHANNEL="${DEVOPS_ALFIE_CHANNEL:-devops-alfie}"
 
         kubectl create namespace agent --dry-run=client -o yaml | kubectl apply -f -
         kubectl -n agent create secret generic agent-secrets \
@@ -310,6 +315,8 @@ tasks:
           --from-literal=EVIDENCE_S3_ACCESS_KEY="$EVIDENCE_S3_ACCESS_KEY" \
           --from-literal=EVIDENCE_S3_SECRET_KEY="$EVIDENCE_S3_SECRET_KEY" \
           --from-literal=EVIDENCE_S3_BUCKET="$EVIDENCE_S3_BUCKET" \
+          --from-literal=SLACK_BOT_TOKEN="$SLACK_BOT_TOKEN" \
+          --from-literal=DEVOPS_ALFIE_CHANNEL="$DEVOPS_ALFIE_CHANNEL" \
           --dry-run=client -o yaml | kubectl apply -f -
 
   agent:deploy:
@@ -334,6 +341,15 @@ tasks:
     cmds:
       - echo "Agent intake → http://localhost:8000  (POST /webhook/alertmanager)"
       - kubectl -n agent port-forward svc/agent 8000:8000
+
+  collectors:forward:
+    desc: Port-forward collector services for testing
+    cmds:
+      - echo "Starting collector port-forwards..."
+      - kubectl -n agent port-forward svc/prom-collector 8001:8001 &
+      - kubectl -n agent port-forward svc/loki-collector 8002:8002 &
+      - kubectl -n agent port-forward svc/kube-collector 8003:8003 &
+      - sleep 2
 
   # ── Collectors (Go) ──────────────────────────────────────────────────
 
@@ -387,7 +403,8 @@ tasks:
   collectors:logs:
     desc: Tail logs for all three collectors
     cmds:
-      - kubectl -n agent logs -f -l component=collector --all-containers --prefix=true --tail=50
+      - kubectl -n agent logs -f -l component=collector --all-containers
+        --prefix=true --tail=50
 
   # ── Agent-infra (Postgres + MinIO, in-cluster) ───────────────────────
   # Replaces the old host-side docker-compose stack. Helm-based.
